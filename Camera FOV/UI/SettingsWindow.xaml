@@ -1,0 +1,211 @@
+<Window x:Class="Camera_FOV.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Camera_FOV"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+        mc:Ignorable="d"
+        Title="Settings" 
+        SizeToContent="Height" Width="320"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStyle="None"
+        WindowStartupLocation="CenterOwner">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.ComboBox.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Dark.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            
+            <!-- Reuse brushes from App.xaml or define them if they are local. MainWindow used DynamicResource, implying App-level or Window-level. 
+                 MainWindow defined them in App.xaml effectively or implied. 
+                 Wait, MainWindow.xaml used DynamicResource but didn't define the brushes in its own Resources (except styles). 
+                 They must be in App.xaml. I should be safe using DynamicResource if App.xaml is loaded. -->
+            
+            <Style x:Key="CustomTextBoxStyle" BasedOn="{StaticResource {x:Type TextBox}}" TargetType="TextBox">
+                <Setter Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource ForegroundBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="2,0,2,0" />
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Border x:Name="Border"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="2"> <!-- Slight rounding -->
+                                <ScrollViewer x:Name="PART_ContentHost" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Border" Property="BorderBrush" Value="{DynamicResource SelectionHoverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                    <Setter TargetName="Border" Property="BorderBrush" Value="{DynamicResource TextHighlightBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <!-- Settings Button Style -->
+            <Style x:Key="SettingsButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource ForegroundBrush}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ButtonBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="5">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Content="{TemplateBinding Content}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}"/>
+                                    <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource IconHoverBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource IconHoverBrush}"/>
+                                    <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid Background="Transparent" ClipToBounds="True">
+        <!--  Outer Border with Opacity and Blur  -->
+        <Border BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="2"
+                ClipToBounds="True"
+                CornerRadius="10"
+                Opacity="0.7"
+                SnapsToDevicePixels="True">
+            <Border.Effect>
+                <BlurEffect KernelType="Gaussian" Radius="2" />
+            </Border.Effect>
+        </Border>
+
+        <!--  Content Container  -->
+        <Border Margin="2"
+                Background="{DynamicResource PrimaryBackgroundBrush}"
+                CornerRadius="10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="30" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!--  Title Bar  -->
+                <local:TitleBar Grid.Row="0" Margin="0,0,0,1" Foreground="{DynamicResource ForegroundBrush}"/>
+
+                 <!-- Settings Content -->
+                 <StackPanel Grid.Row="1" Margin="10">
+                     
+                     <TextBlock Text="Setup" 
+                                FontSize="14" 
+                                FontWeight="Bold" 
+                                Foreground="{DynamicResource ForegroundBrush}"
+                                Margin="0,0,0,10"/>
+
+                     <!--  Button 1  -->
+                    <Button x:Name="ActionButton1"
+                            Height="25"
+                            Margin="0,5,0,0"
+                            Click="ActionButton1_Click"
+                            Content="Create line type &quot;Boundary&quot;"
+                            FontSize="12"
+                            Style="{StaticResource SettingsButtonStyle}"/>
+
+                    <!--  Button 2  -->
+                    <Button x:Name="ActionButton2"
+                            Height="25"
+                            Margin="0,5,0,0"
+                            Click="ActionButton2_Click"
+                            Content="Create filled region types"
+                            FontSize="12"
+                            Style="{StaticResource SettingsButtonStyle}"/>
+
+                    <!--  Button 3  -->
+                    <Button x:Name="ActionButton3"
+                            Height="25"
+                            Margin="0,5,0,0"
+                            Click="ActionButton3_Click"
+                            Content="Trace walls"
+                            FontSize="12"
+                            Style="{StaticResource SettingsButtonStyle}"/>
+
+                    <!--  Value Slider  -->
+                    <StackPanel Margin="0,15,0,0">
+                        <TextBlock Margin="0,0,0,5"
+                                   HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource ForegroundBrush}"
+                                   Text="Adjust Filled Region Draw Resolution:" />
+                        <Slider x:Name="ValueSlider"
+                                Width="240"
+                                HorizontalAlignment="Center"
+                                IsSnapToTickEnabled="True"
+                                Maximum="1.0"
+                                Minimum="0.1"
+                                TickFrequency="0.1"
+                                ValueChanged="ValueSlider_ValueChanged"
+                                Value="0.5" 
+                                Foreground="{DynamicResource ForegroundBrush}"/>
+                    </StackPanel>
+                    
+                    <!-- Parameter Configuration -->
+                    <StackPanel Margin="0,15,0,0">
+                         <TextBlock Text="Parameter Configuration" 
+                                FontSize="14" 
+                                FontWeight="Bold" 
+                                Foreground="{DynamicResource ForegroundBrush}"
+                                Margin="0,0,0,10"/>
+
+                         <!-- Rotation Param -->
+                         <TextBlock Text="Rotation (Instance) [Type: Angle]:" Foreground="{DynamicResource ForegroundBrush}" Margin="0,5,0,2"/>
+                         <TextBox x:Name="ParamRotation" Style="{StaticResource CustomTextBoxStyle}" Height="25"/>
+                         
+                         <!-- FOV Override Param -->
+                         <TextBlock Text="FOV Override (Instance) [Type: Angle]:" Foreground="{DynamicResource ForegroundBrush}" Margin="0,5,0,2"/>
+                         <TextBox x:Name="ParamFOVOverride" Style="{StaticResource CustomTextBoxStyle}" Height="25"/>
+                         
+                         <!-- Standard FOV Param -->
+                         <TextBlock Text="Standard FOV (Instance/Type) [Type: Angle]:" Foreground="{DynamicResource ForegroundBrush}" Margin="0,5,0,2"/>
+                         <TextBox x:Name="ParamStandardFOV" Style="{StaticResource CustomTextBoxStyle}" Height="25"/>
+                         
+                         <!-- Resolution Param -->
+                         <!-- Resolution Param -->
+                         <TextBlock Text="Resolution (Instance/Type) [Type: Text]:" Foreground="{DynamicResource ForegroundBrush}" Margin="0,5,0,2"/>
+                         <TextBox x:Name="ParamResolution" Style="{StaticResource CustomTextBoxStyle}" Height="25"/>
+
+                         <!-- Apply Button -->
+                         <Button x:Name="ApplyButton"
+                                Height="30"
+                                Margin="0,15,0,10"
+                                Click="ApplyButton_Click"
+                                Content="Apply"
+                                FontSize="12"
+                                Style="{StaticResource SettingsButtonStyle}"/>
+                    </StackPanel>
+
+                 </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

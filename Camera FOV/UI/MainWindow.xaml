@@ -6,7 +6,7 @@
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
     Title="Camera FOV"
     Width="285"
-    Height="550"
+    SizeToContent="Height"
     MinWidth="285"
     MinHeight="300"
     AllowsTransparency="True"
@@ -890,239 +890,26 @@
                             </StackPanel>
                         </materialDesign:Card>
 
-                        <!--  Toggle Button with Icon  -->
-                        <ToggleButton
-                            x:Name="MyToggleButton"
-                            Width="18"
-                            Height="9"
-                            Margin="243,0,0,0"
-                            HorizontalAlignment="Center"
-                            Background="Transparent"
-                            BorderBrush="Transparent"
-                            Click="MyToggleButton_Click"
-                            IsChecked="False"
-                            ToolTip="Toggle some functionality">
-                            <ToggleButton.Template>
-                                <ControlTemplate TargetType="ToggleButton">
-                                    <Grid>
-                                        <materialDesign:PackIcon
-                                            x:Name="ToggleButtonIcon"
-                                            Width="30"
-                                            Height="30"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Foreground="{DynamicResource ForegroundBrush}"
-                                            Kind="MenuDown" />
-                                    </Grid>
-                                    <ControlTemplate.Triggers>
-                                        <!--  Change icon when toggled  -->
-                                        <Trigger Property="IsChecked" Value="True">
-                                            <Setter TargetName="ToggleButtonIcon" Property="Kind" Value="MenuUp" />
-                                            <Setter TargetName="ToggleButtonIcon" Property="Foreground" Value="{DynamicResource SelectionPressedBrush}" />
-                                        </Trigger>
-                                        <!--  Change color on hover  -->
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="ToggleButtonIcon" Property="Foreground" Value="{DynamicResource IconHoverBrush}" />
-                                        </Trigger>
-                                        <!--  Change color on click  -->
-                                        <Trigger Property="IsPressed" Value="True">
-                                            <Setter TargetName="ToggleButtonIcon" Property="Foreground" Value="{DynamicResource SelectionPressedBrush}" />
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </ToggleButton.Template>
-                        </ToggleButton>
-
-
-
-                        <materialDesign:Card
-                            Margin="0,18,0,0"
-                            Padding="10"
-                            Background="Transparent"
-                            BorderBrush="Gray"
-                            BorderThickness="1">
-                            <StackPanel Margin="0,-5,0,0">
-                                <!--  Header  -->
-                                <TextBlock
-                                    Width="230"
-                                    FontSize="14"
-                                    FontWeight="Bold"
+                        <!--  Settings Button  -->
+                        <!--  Settings Button Container  -->
+                        <Grid HorizontalAlignment="Stretch" Margin="0,5,0,10">
+                            <Button
+                                x:Name="SettingsButton"
+                                Width="25"
+                                Height="25"
+                                Margin="0,0,20,0"
+                                HorizontalAlignment="Right"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                Click="SettingsButton_Click"
+                                ToolTip="Open Settings">
+                                <materialDesign:PackIcon
+                                    Width="20"
+                                    Height="20"
                                     Foreground="{DynamicResource ForegroundBrush}"
-                                    Text="Setup" />
-
-                                <!--  Button 1  -->
-                                <Button
-                                    x:Name="ActionButton1"
-                                    Width="200"
-                                    Height="25"
-                                    Margin="0,5,0,0"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Background="{DynamicResource SecondaryBackgroundBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}"
-                                    Click="ActionButton1_Click"
-                                    Content="Create line type &quot;Boundary&quot;"
-                                    FontSize="12"
-                                    Foreground="{DynamicResource ForegroundBrush}">
-                                    <Button.Style>
-                                        <Style TargetType="Button">
-                                            <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="Template">
-                                                <Setter.Value>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border
-                                                            x:Name="ButtonBorder"
-                                                            Background="{TemplateBinding Background}"
-                                                            BorderBrush="{TemplateBinding BorderBrush}"
-                                                            BorderThickness="{TemplateBinding BorderThickness}"
-                                                            CornerRadius="5">
-                                                            <ContentPresenter
-                                                                HorizontalAlignment="Center"
-                                                                VerticalAlignment="Center"
-                                                                Content="{TemplateBinding Content}" />
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <!--  Hover Effect  -->
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}" />
-                                                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource IconHoverBrush}" />
-                                                            </Trigger>
-                                                            <!--  Pressed Effect  -->
-                                                            <Trigger Property="IsPressed" Value="True">
-                                                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource IconHoverBrush}" />
-                                                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Setter.Value>
-                                            </Setter>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-                                <!--  Button 2  -->
-                                <Button
-                                    x:Name="ActionButton2"
-                                    Width="200"
-                                    Height="25"
-                                    Margin="0,5,0,0"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Background="{DynamicResource SecondaryBackgroundBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}"
-                                    Click="ActionButton2_Click"
-                                    Content="Create filled region types"
-                                    FontSize="12"
-                                    Foreground="{DynamicResource ForegroundBrush}">
-                                    <Button.Style>
-                                        <Style TargetType="Button">
-                                            <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="Template">
-                                                <Setter.Value>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border
-                                                            x:Name="ButtonBorder"
-                                                            Background="{TemplateBinding Background}"
-                                                            BorderBrush="{TemplateBinding BorderBrush}"
-                                                            BorderThickness="{TemplateBinding BorderThickness}"
-                                                            CornerRadius="5">
-                                                            <ContentPresenter
-                                                                HorizontalAlignment="Center"
-                                                                VerticalAlignment="Center"
-                                                                Content="{TemplateBinding Content}" />
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <!--  Hover Effect  -->
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}" />
-                                                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource IconHoverBrush}" />
-                                                            </Trigger>
-                                                            <!--  Pressed Effect  -->
-                                                            <Trigger Property="IsPressed" Value="True">
-                                                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource IconHoverBrush}" />
-                                                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Setter.Value>
-                                            </Setter>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-                                <!--  Button 3  -->
-                                <Button
-                                    x:Name="ActionButton3"
-                                    Width="200"
-                                    Height="25"
-                                    Margin="0,5,0,0"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Background="{DynamicResource SecondaryBackgroundBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}"
-                                    Click="ActionButton3_Click"
-                                    Content="Trace walls"
-                                    FontSize="12"
-                                    Foreground="{DynamicResource ForegroundBrush}">
-                                    <Button.Style>
-                                        <Style TargetType="Button">
-                                            <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="Template">
-                                                <Setter.Value>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border
-                                                            x:Name="ButtonBorder"
-                                                            Background="{TemplateBinding Background}"
-                                                            BorderBrush="{TemplateBinding BorderBrush}"
-                                                            BorderThickness="{TemplateBinding BorderThickness}"
-                                                            CornerRadius="5">
-                                                            <ContentPresenter
-                                                                HorizontalAlignment="Center"
-                                                                VerticalAlignment="Center"
-                                                                Content="{TemplateBinding Content}" />
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <!--  Hover Effect  -->
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}" />
-                                                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource IconHoverBrush}" />
-                                                            </Trigger>
-                                                            <!--  Pressed Effect  -->
-                                                            <Trigger Property="IsPressed" Value="True">
-                                                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource IconHoverBrush}" />
-                                                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Setter.Value>
-                                            </Setter>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-
-                                <!--  Value Slider  -->
-                                <StackPanel Margin="0,10,0,0">
-                                    <TextBlock
-                                        Margin="0,0,0,5"
-                                        HorizontalAlignment="Center"
-                                        Foreground="{DynamicResource ForegroundBrush}"
-                                        Text="Adjust Filled Region Draw Resolution:" />
-                                    <Slider
-                                        x:Name="ValueSlider"
-                                        Width="249"
-                                        HorizontalAlignment="Center"
-                                        Background="Transparent"
-                                        BorderBrush="Gray"
-                                        Foreground="{DynamicResource ForegroundBrush}"
-                                        IsSnapToTickEnabled="True"
-                                        Maximum="1.0"
-                                        Minimum="0.1"
-                                        TickFrequency="0.1"
-                                        ToolTip="Warning! Changing the resolution too low can cause performance issues!"
-                                        ValueChanged="ValueSlider_ValueChanged"
-                                        Value="0.5" />
-                                </StackPanel>
-
-                            </StackPanel>
-                        </materialDesign:Card>
+                                    Kind="Cog" />
+                            </Button>
+                        </Grid>
 
                     </StackPanel>
                 </Grid>

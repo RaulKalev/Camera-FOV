@@ -2,6 +2,11 @@
 
 A comprehensive Revit plugin designed to calculate and visualize Security Camera Field of View (FOV) based on DORI (Detection, Observation, Recognition, Identification) standards.
 
+## Supported Revit Versions
+
+- **Revit 2024**
+- **Revit 2026**
+
 ## Features
 
 - **FOV Visualization**: Generates precise 2D filled regions representing the camera's coverage area directly in your Revit views.
@@ -10,8 +15,8 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
   - **Observation** (63px/m)
   - **Recognition** (125px/m)
   - **Identification** (250px/m)
-- **Automatic Geometry**: Automatically handles obstacles like walls and columns to create accurate visible areas.
-- **Smart Rotation**: Auto-detects camera orientation from Revit families and supports manual "Pööra Kaamerat" offsets.
+- **Manual Boundary Definition**: Uses detail lines to allow users to manually define visual boundaries for the FOV.
+- **Smart Rotation**: Auto-detects camera orientation from Revit families and supports manual rotation offsets.
 - **Customizable**: Adjustable max distance, FOV angle, and resolution settings.
 - **Modern UI**: Features a sleek interface with Dark/Light theme support.
 
@@ -23,31 +28,32 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
 ## Usage
 
 1. Open a Floor Plan view in Revit.
-2. Run the `Show Camera FOV` command.
-3. Select a security camera element.
-4. Adjust DORI settings, Resolution, and Angle as needed.
-5. Click **"Draw"** to generate the FOV visualization.
+2. Go to the **RK Tools** tab.
+3. Click **Run Camera FOV plugin**.
+4. Select a security camera element.
+5. Adjust DORI settings, Resolution, and Angle as needed.
+6. Click **"Draw"** to generate the FOV visualization.
 
 ## Requirements
 
 ### Revit Families
 The plugin works with elements in the **Security Devices** category (`OST_SecurityDevices`).
-For full functionality, the families should contain the following parameters:
+For full functionality, the families should contain the following parameters (Parameter names are configurable in Settings):
 
-| Parameter Name | Type | Description |
+| Parameter Name | Data Type | Description |
 | :--- | :--- | :--- |
-| **Vaatenurk** | Instance | The camera's Field of View angle (in degrees). |
-| **Horisontaalne Resolutsioon** | Type/Instance | The sensor's horizontal resolution (in pixels). |
-| **Pööra Kaamerat** | Instance | (Optional) Manual rotation offset for the camera (in degrees). |
-| **Kaamera nurk** | Type/Instance | (Optional) Legacy fallback for rotation offset. |
+| **Vaatenurk** | Angle | The camera's Field of View angle (in degrees). |
+| **Horisontaalne Resolutsioon** | Text or Integer | The sensor's horizontal resolution (e.g. "1920" or "1920 px"). |
+| **Pööra Kaamerat** | Angle | (Optional) Manual rotation offset for the camera (in degrees). |
+| **Kaamera nurk** | Angle | (Optional) Legacy fallback for rotation offset. |
 
 ## Technical Overview
 
 ### How it Works
-The FOV generation uses an intelligent **ray-casting algorithm** to simulate the camera's line of sight. 
+The FOV generation uses an intelligent algorithm to simulate the camera's line of sight. 
 1. **Ray Emission**: The system casts rays across the specified Field of View angle.
-2. **Obstruction Detection**: It utilizes Revit's `ReferenceIntersector` to detect collisions with model elements like walls, columns, and other obstacles.
-3. **Geometry Synthesis**: Intersection points are connected to form a closed loop, generating a `FilledRegion` that accurately represents the visible area, respecting physical occlusions.
+2. **Boundary Definition**: It detects Detail Lines to limit the FOV, allowing users to manually define obstacles or view limits.
+3. **Geometry Synthesis**: Intersection points are connected to form a closed loop, generating a `FilledRegion` that accurately represents the visible area.
 
 ### DORI Calculation
 The maximum effective range is dynamically calculated based on the **DORI standard** (Pixels Per Meter), ensuring the visualization meets specific security requirements (Detection, Observation, Recognition, Identification). 

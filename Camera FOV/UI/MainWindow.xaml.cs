@@ -128,11 +128,8 @@ namespace Camera_FOV
             // Parse the saved resolution with invariant culture
             _sliderResolution = SettingsManager.Settings.Resolution;
 
-            // Set the slider value from the settings
-            ValueSlider.Value = _sliderResolution;
-
-            // Attach event for slider value changes
-            ValueSlider.ValueChanged += ValueSlider_ValueChanged;
+            // ValueSlider moved to Settings Window
+            // _sliderResolution already loaded above
 
             InitializeDrawingTools();
             AttachUpdateHandlers();
@@ -218,7 +215,7 @@ namespace Camera_FOV
                 var settings = SettingsManager.Settings;
 
                 settings.FOVAngle = double.TryParse(FOVAngleTextBox.Text, out double fov) ? fov : 93.0;
-                settings.Resolution = ValueSlider.Value;
+                settings.Resolution = _sliderResolution;
 
                 if (ResolutionComboBox.SelectedItem is ComboBoxItem selectedItem &&
                     int.TryParse(selectedItem.Content.ToString(), out int selectedResolution))
@@ -243,7 +240,7 @@ namespace Camera_FOV
                 var settings = SettingsManager.Settings;
 
                 FOVAngleTextBox.Text = settings.FOVAngle.ToString(CultureInfo.InvariantCulture);
-                ValueSlider.Value = settings.Resolution;
+                // ValueSlider moved to SettingsWindow
 
                 foreach (ComboBoxItem item in ResolutionComboBox.Items)
                 {
@@ -610,7 +607,7 @@ namespace Camera_FOV
                         bool foundParam = false;
                         
                         // 1. Try "Pööra Kaamerat" (Instance)
-                        Parameter p1 = element.LookupParameter("Pööra Kaamerat");
+                        Parameter p1 = element.LookupParameter(SettingsManager.Settings.ParameterName_UserRotation);
                         if (p1 != null)
                         {
                             double val = p1.AsDouble();
@@ -637,7 +634,7 @@ namespace Camera_FOV
                         bool fovFound = false;
 
                         // 1. Check "Kaamera nurk" (Override)
-                        Parameter knInst = element.LookupParameter("Kaamera nurk");
+                        Parameter knInst = element.LookupParameter(SettingsManager.Settings.ParameterName_FOVOverride);
                         if (knInst != null)
                         {
                             double val = knInst.AsDouble();
@@ -651,7 +648,7 @@ namespace Camera_FOV
                         // 2. Check "Vaatenurk" (Instance)
                         if (!fovFound)
                         {
-                             Parameter vnInst = element.LookupParameter("Vaatenurk");
+                             Parameter vnInst = element.LookupParameter(SettingsManager.Settings.ParameterName_StandardFOV);
                              if (vnInst != null)
                              {
                                  finalFovDegrees = vnInst.AsDouble() * (180.0 / Math.PI);
@@ -667,7 +664,7 @@ namespace Camera_FOV
                             {
                                 if (_doc.GetElement(typeId) is ElementType elementType)
                                 {
-                                    Parameter vnType = elementType.LookupParameter("Vaatenurk");
+                                    Parameter vnType = elementType.LookupParameter(SettingsManager.Settings.ParameterName_StandardFOV);
                                     if (vnType != null)
                                     {
                                         finalFovDegrees = vnType.AsDouble() * (180.0 / Math.PI);
@@ -683,7 +680,7 @@ namespace Camera_FOV
                         }
 
                         // Read "Horisontaalne Resolutsioon" parameter (Resolution)
-                        Parameter resolutionParameter = element.LookupParameter("Horisontaalne Resolutsioon");
+                        Parameter resolutionParameter = element.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
 
                         // If not found on instance, try on type
                         if (resolutionParameter == null)
@@ -693,7 +690,7 @@ namespace Camera_FOV
                             {
                                 if (_doc.GetElement(typeId) is ElementType elementType)
                                 {
-                                    resolutionParameter = elementType.LookupParameter("Horisontaalne Resolutsioon");
+                                    resolutionParameter = elementType.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
                                 }
                             }
                         }
@@ -806,7 +803,7 @@ namespace Camera_FOV
                 double maxDistance = ParseMaxDistance();
                 double rotationAngle = GetFinalRotationAngle();
                 double fovAngle = double.TryParse(FOVAngleTextBox.Text, out double value) ? value : 90.0;
-                double resolution = ValueSlider.Value; // Get slider value
+                double resolution = _sliderResolution; // Get slider value
 
                 _drawingEventHandler.Setup(
                     _drawingTools,
@@ -852,25 +849,23 @@ namespace Camera_FOV
         {
             TriggerDetailLineUpdate();
         }
-        private void MyToggleButton_Click(object sender, RoutedEventArgs e)
+        // ------------------------------
+        // SETTINGS WINDOW ACTIONS
+        // ------------------------------
+        private SettingsWindow _settingsWindow;
+
+        private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            double targetHeight = MyToggleButton.IsChecked == true ? this.Height + 200 : this.Height - 200;
-
-            // Animate the window height
-            DoubleAnimation heightAnimation = new DoubleAnimation
+            if (_settingsWindow == null || !_settingsWindow.IsLoaded)
             {
-                From = this.Height,
-                To = targetHeight,
-                Duration = TimeSpan.FromMilliseconds(300),
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
-            };
-
-            this.BeginAnimation(Window.HeightProperty, heightAnimation);
-
-            // Update the tooltip
-            MyToggleButton.ToolTip = MyToggleButton.IsChecked == true
-                ? "Collapse UI"
-                : "Expand UI";
+                _settingsWindow = new SettingsWindow(this);
+                _settingsWindow.Owner = this;
+                _settingsWindow.Show();
+            }
+            else
+            {
+                _settingsWindow.Activate();
+            }
         }
 
         private void TriggerDetailLineUpdate()
@@ -903,7 +898,7 @@ namespace Camera_FOV
                 _isProcessingUpdate = false;
             }
         }
-        private void ActionButton1_Click(object sender, RoutedEventArgs e)
+        public void CreateBoundaryLine()
         {
             try
             {
@@ -912,10 +907,11 @@ namespace Camera_FOV
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred while handling the action: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-        private void ActionButton2_Click(object sender, RoutedEventArgs e)
+
+        public void CreateFilledRegionTypes()
         {
             try
             {
@@ -924,10 +920,11 @@ namespace Camera_FOV
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred while handling the action: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-        private void ActionButton3_Click(object sender, RoutedEventArgs e)
+
+        public void TraceWalls()
         {
             try
             {
@@ -940,9 +937,14 @@ namespace Camera_FOV
             }
         }
 
-        private void ValueSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        public void UpdateSliderResolution(double value)
         {
-            _sliderResolution = e.NewValue; // Update resolution value based on slider
+            _sliderResolution = value;
+        }
+
+        public double GetSliderResolution()
+        {
+            return _sliderResolution;
         }
         private void DORIOption_Checked(object sender, RoutedEventArgs e)
         {
@@ -1018,12 +1020,12 @@ namespace Camera_FOV
             if (element == null) return false;
 
             // 1) Try instance parameter
-            Parameter p = element.LookupParameter("Horisontaalne Resolutsioon");
+            Parameter p = element.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
 
             // 2) Try type via FamilyInstance.Symbol first (most reliable for family types)
             if (p == null && element is FamilyInstance fi && fi.Symbol != null)
             {
-                p = fi.Symbol.LookupParameter("Horisontaalne Resolutsioon");
+                p = fi.Symbol.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
             }
 
             // 3) Try generic ElementType lookup as a fallback
@@ -1034,7 +1036,7 @@ namespace Camera_FOV
                 {
                     if (_doc.GetElement(typeId) is ElementType elementType)
                     {
-                        p = elementType.LookupParameter("Horisontaalne Resolutsioon");
+                        p = elementType.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
                     }
                 }
             }

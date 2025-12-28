@@ -25,7 +25,8 @@ namespace Camera_FOV.Services
                 if (File.Exists(SettingsFilePath))
                 {
                     string json = File.ReadAllText(SettingsFilePath);
-                    Settings = JsonConvert.DeserializeObject<PluginSettings>(json) ?? new PluginSettings();
+                    var settings = new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace };
+                    Settings = JsonConvert.DeserializeObject<PluginSettings>(json, settings) ?? new PluginSettings();
                 }
                 else
                 {

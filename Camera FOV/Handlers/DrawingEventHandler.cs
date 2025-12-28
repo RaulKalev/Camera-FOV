@@ -2,7 +2,9 @@
 using Autodesk.Revit.DB.Structure;
 using Autodesk.Revit.UI;
 using Camera_FOV.Utils;
+using Camera_FOV.Utils;
 using Camera_FOV;
+using Camera_FOV.Services;
 
 using System;
 using System.Collections.Generic;
@@ -658,7 +660,7 @@ namespace Camera_FOV.Handlers
             trans.Start();
 
             // 1. Update "Pööra Kaamerat" (Rotation)
-            Parameter rotationParam = _cameraElement.LookupParameter("Pööra Kaamerat");
+            Parameter rotationParam = _cameraElement.LookupParameter(SettingsManager.Settings.ParameterName_UserRotation);
             if (rotationParam != null && !rotationParam.IsReadOnly)
             {
                 double rotationRadians = _parameterValue * (Math.PI / 180.0);
@@ -666,7 +668,7 @@ namespace Camera_FOV.Handlers
             }
 
             // 2. Update "Kaamera nurk" (FOV Override)
-            Parameter fovParam = _cameraElement.LookupParameter("Kaamera nurk");
+            Parameter fovParam = _cameraElement.LookupParameter(SettingsManager.Settings.ParameterName_FOVOverride);
             if (fovParam != null && !fovParam.IsReadOnly)
             {
                 double fovRadians = _fovAngle * (Math.PI / 180.0);
