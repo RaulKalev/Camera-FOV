@@ -127,6 +127,16 @@
                                     FocusVisualStyle="{x:Null}"
                                     Foreground="{TemplateBinding Foreground}"
                                     IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                                                <Grid>
+                                                    <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+                                                    <materialDesign:PackIcon Kind="ChevronDown" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Foreground="{TemplateBinding Foreground}" Width="16" Height="16"/>
+                                                </Grid>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
 
                                     <ContentPresenter
                                         Margin="{TemplateBinding Padding}"
@@ -164,8 +174,8 @@
                                 </Trigger>
                                 <!--  Hover Effect Trigger  -->
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="ToggleButton" Property="Background" Value="{DynamicResource HighlightBrush}" />
-                                    <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource HighlightBrush}" />
+                                    <Setter TargetName="ToggleButton" Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}" />
+                                    <Setter TargetName="ToggleButton" Property="BorderBrush" Value="{DynamicResource SelectionHoverBrush}" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -901,12 +911,28 @@
                                 HorizontalAlignment="Right"
                                 Background="Transparent"
                                 BorderBrush="Transparent"
+                                Foreground="{DynamicResource ForegroundBrush}"
                                 Click="SettingsButton_Click"
                                 ToolTip="Open Settings">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" Background="Transparent" CornerRadius="2">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                 <Setter Property="Opacity" Value="0.7"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                 <Setter Property="Opacity" Value="0.5"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
                                 <materialDesign:PackIcon
                                     Width="20"
                                     Height="20"
-                                    Foreground="{DynamicResource ForegroundBrush}"
+                                    Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                     Kind="Cog" />
                             </Button>
                         </Grid>
