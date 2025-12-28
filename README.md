@@ -39,7 +39,7 @@ For full functionality, the families should contain the following parameters:
 | **Vaatenurk** | Instance | The camera's Field of View angle (in degrees). |
 | **Horisontaalne Resolutsioon** | Type/Instance | The sensor's horizontal resolution (in pixels). |
 | **Pööra Kaamerat** | Instance | (Optional) Manual rotation offset for the camera (in degrees). |
-| **Kaamera nurk** | Instance | (Optional) Legacy fallback for rotation offset. |
+| **Kaamera nurk** | Type/Instance | (Optional) Legacy fallback for rotation offset. |
 
 ## Technical Overview
 
@@ -48,6 +48,10 @@ The FOV generation uses an intelligent **ray-casting algorithm** to simulate the
 1. **Ray Emission**: The system casts rays across the specified Field of View angle.
 2. **Obstruction Detection**: It utilizes Revit's `ReferenceIntersector` to detect collisions with model elements like walls, columns, and other obstacles.
 3. **Geometry Synthesis**: Intersection points are connected to form a closed loop, generating a `FilledRegion` that accurately represents the visible area, respecting physical occlusions.
+
+### DORI Calculation
+The maximum effective range is dynamically calculated based on the **DORI standard** (Pixels Per Meter), ensuring the visualization meets specific security requirements (Detection, Observation, Recognition, Identification). 
+The formula derives the maximum distance from the camera's **Resolution** and **Field of View**, adhering to the mathematical relationship between pixel density and arc length.
 
 ## License
 
