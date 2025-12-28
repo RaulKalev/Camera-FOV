@@ -1,0 +1,32 @@
+# Visual Studio 2022
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# NuGet
+*.nupkg
+*.snupkg
+*.nuspec
+!packages.config
+
+# Revit Add-in specific
+*_AddIn_temp/
+*.addin
+
+# Settings
+Settings.settings
+App.config
+
+# Logs
+*.log
+*.txt
+
+# Temporary files
+*.tmp
+*_wpftmp.csproj
