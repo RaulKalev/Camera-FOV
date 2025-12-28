@@ -14,6 +14,13 @@ using System.Windows.Threading;
 
 namespace Camera_FOV.Handlers
 {
+    public class DoriLayerConfig
+    {
+        public double Distance { get; set; }
+        public ElementId TypeId { get; set; }
+        public bool DrawDimension { get; set; }
+    }
+
     public class DrawingEventHandler : IExternalEventHandler
 {
     public enum DrawingAction
@@ -47,6 +54,7 @@ namespace Camera_FOV.Handlers
     private double _parameterValue; // For parameter updates
     private Dictionary<string, ElementId> _cameraToFilledRegionMap = new Dictionary<string, ElementId>(); // Track regions per camera+type
     public bool DrawAngularDimension { get; set; } = false;
+    private List<DoriLayerConfig> _doriLayers;
 
     public void SetMainWindow(MainWindow mainWindow)
     {
@@ -82,7 +90,8 @@ namespace Camera_FOV.Handlers
         ElementId filledRegionTypeId = null,
         double sliderResolution = 1.0,
         Element cameraElement = null,
-        double userRotationForParameter = 0)
+        double userRotationForParameter = 0,
+        List<DoriLayerConfig> doriLayers = null)
     {
         _drawingTools = drawingTools;
         _currentAction = action;
@@ -94,6 +103,7 @@ namespace Camera_FOV.Handlers
         _sliderResolution = sliderResolution;
         _cameraElement = cameraElement;
         _parameterValue = userRotationForParameter;
+        _doriLayers = doriLayers;
     }
 
     public void SetupCameraParameterUpdate(Element cameraElement, double rotationValue)
@@ -132,48 +142,19 @@ namespace Camera_FOV.Handlers
                     if (_cameraElement != null)
                     {
                         UpdateCameraParameter();
-                        
-                        // Check if we already have a region for this camera+type and delete it
-                        // Composite key: CameraId + FilledRegionTypeId
-                        string compositeKey = _cameraElement.Id.ToString();
-                        
-                        // Append RegionTypeId if available to support different DORI regions
-                        if (_filledRegionTypeId != null)
-                        {
-                            compositeKey += "_" + _filledRegionTypeId.ToString();
-                        }
+                    }
 
-                        if (_cameraToFilledRegionMap.ContainsKey(compositeKey))
+                    if (_doriLayers != null && _doriLayers.Any())
+                    {
+                        foreach (var layer in _doriLayers)
                         {
-                            ElementId oldRegionId = _cameraToFilledRegionMap[compositeKey];
-                            _drawingTools.DeleteElement(oldRegionId);
-                            _cameraToFilledRegionMap.Remove(compositeKey);
-                        }
-                        
-                        _drawingTools.SetParameters(_position, _maxDistance, _rotationAngle, _fovAngle, _filledRegionTypeId);
-                        ElementId newRegionId = _drawingTools.DrawFilledRegion(_sliderResolution);
-                        
-                        // Track the new region
-                        if (newRegionId != ElementId.InvalidElementId)
-                        {
-                            _cameraToFilledRegionMap[compositeKey] = newRegionId;
-                            
-                            // Create Angular Dimension if requested (e.g. for Identification DORI)
-                            if (DrawAngularDimension)
-                            {
-                                _drawingTools.CreateAngularDimension(newRegionId);
-                            }
+                            DrawLayer(layer.Distance, layer.TypeId, layer.DrawDimension);
                         }
                     }
                     else
                     {
-                        // Fallback if no camera element provided (e.g. testing)
-                         _drawingTools.SetParameters(_position, _maxDistance, _rotationAngle, _fovAngle, _filledRegionTypeId);
-                         ElementId newRegionId = _drawingTools.DrawFilledRegion(_sliderResolution);
-                         if (DrawAngularDimension && newRegionId != ElementId.InvalidElementId)
-                         {
-                             _drawingTools.CreateAngularDimension(newRegionId);
-                         }
+                        // Fallback single mode
+                        DrawLayer(_maxDistance, _filledRegionTypeId, DrawAngularDimension);
                     }
                     break;
 
@@ -676,6 +657,37 @@ namespace Camera_FOV.Handlers
             }
 
             trans.Commit();
+        }
+    }
+
+    private void DrawLayer(double distance, ElementId typeId, bool drawDimension)
+    {
+        string compositeKey = (_cameraElement != null) ? _cameraElement.Id.ToString() : "NoCam";
+
+        if (typeId != null)
+        {
+            compositeKey += "_" + typeId.ToString();
+        }
+
+        if (_cameraToFilledRegionMap.ContainsKey(compositeKey))
+        {
+            ElementId oldRegionId = _cameraToFilledRegionMap[compositeKey];
+            _drawingTools.DeleteElement(oldRegionId);
+            _cameraToFilledRegionMap.Remove(compositeKey);
+        }
+
+        _drawingTools.SetParameters(_position, distance, _rotationAngle, _fovAngle, typeId);
+        ElementId newRegionId = _drawingTools.DrawFilledRegion(1.0); // Use 1.0 degree step for geometry generation
+
+        if (newRegionId != ElementId.InvalidElementId)
+        {
+            if (_cameraElement != null)
+                _cameraToFilledRegionMap[compositeKey] = newRegionId;
+
+            if (drawDimension)
+            {
+                _drawingTools.CreateAngularDimension(newRegionId);
+            }
         }
     }
 

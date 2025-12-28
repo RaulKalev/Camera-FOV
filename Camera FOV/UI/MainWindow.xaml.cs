@@ -776,46 +776,85 @@ namespace Camera_FOV
         {
             try
             {
-                if (FilledRegionComboBox.SelectedItem == null)
-                {
-                    MessageBox.Show("Please select a filled region type.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                string selectedRegion = FilledRegionComboBox.SelectedItem.ToString();
-                var filledRegionType = new FilteredElementCollector(_doc)
-                    .OfClass(typeof(FilledRegionType))
-                    .Cast<FilledRegionType>()
-                    .FirstOrDefault(r => r.Name == selectedRegion);
-
-                if (filledRegionType == null)
-                {
-                    MessageBox.Show("The selected filled region type could not be found.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
                 if (_selectedCameraPosition == null)
                 {
                     MessageBox.Show("No camera selected. Please select a camera position.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-                double maxDistance = ParseMaxDistance();
+                var doriLayers = new List<DoriLayerConfig>();
+                
+                // Parse resolution from ComboBox
+                double resolution = 1920;
+                if (ResolutionComboBox.SelectedItem is ComboBoxItem item && 
+                    double.TryParse(item.Content.ToString(), out double res))
+                {
+                    resolution = res;
+                }
+                else if (ResolutionComboBox.SelectedItem != null && 
+                         double.TryParse(ResolutionComboBox.SelectedItem.ToString(), out double res2))
+                {
+                    resolution = res2;
+                }
+
+                double fovAngle = double.TryParse(FOVAngleTextBox.Text, out double f) ? f : 90.0;
+
+                // Function to get FilledRegionType ID by partial name
+                ElementId GetTypeId(string namePart)
+                {
+                    var type = new FilteredElementCollector(_doc)
+                        .OfClass(typeof(FilledRegionType))
+                        .Cast<FilledRegionType>()
+                        .FirstOrDefault(x => x.Name.Contains(namePart));
+                    return type?.Id;
+                }
+
+                if (CheckboxDetection.IsChecked == true)
+                {
+                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 7.62m);
+                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_25px"), DrawDimension = false });
+                }
+                if (CheckboxObservation.IsChecked == true)
+                {
+                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 19.2024m);
+                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_63px"), DrawDimension = false });
+                }
+                if (CheckboxRecognition.IsChecked == true)
+                {
+                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 38.1m);
+                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_125px"), DrawDimension = false });
+                }
+                if (CheckboxIdentification.IsChecked == true)
+                {
+                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 76.2m);
+                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_250px"), DrawDimension = true });
+                }
+
+                if (doriLayers.Count == 0)
+                {
+                    MessageBox.Show("Please select at least one DORI option.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Sort layers by Distance Descending (Largest to Smallest)
+                // This ensures Detection (Large) is drawn first (at bottom), Identification (Small) last (top).
+                doriLayers = doriLayers.OrderByDescending(x => x.Distance).ToList();
+
                 double rotationAngle = GetFinalRotationAngle();
-                double fovAngle = double.TryParse(FOVAngleTextBox.Text, out double value) ? value : 90.0;
-                double resolution = _sliderResolution; // Get slider value
+                // Pass the implementation list 
 
                 _drawingEventHandler.Setup(
                     _drawingTools,
                     DrawingEventHandler.DrawingAction.DrawFilledRegion,
                     _selectedCameraPosition,
-                    maxDistance,
+                    doriLayers.First().Distance, // Max distance for legacy use
                     rotationAngle,
                     fovAngle,
-                    filledRegionType.Id,
-                    resolution, // Pass resolution to the event
-                    _selectedCameraElement, // Pass camera element for parameter update
-                    double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double val) ? val : 0 // Pass user rotation
+                    doriLayers.First().TypeId, // Legacy type
+                    resolution,
+                    _selectedCameraElement,
+                    double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double val) ? val : 0,
+                    doriLayers // New list
                 );
 
                 _drawingEventHandler.DrawAngularDimension = (CheckboxIdentification.IsChecked == true);
@@ -950,15 +989,9 @@ namespace Camera_FOV
         {
             if (sender is CheckBox currentCheckbox)
             {
-                // Uncheck all other DORI checkboxes
-                foreach (var checkbox in _doriRegionMapping.Keys)
-                {
-                    if (checkbox != currentCheckbox)
-                    {
-                        checkbox.IsChecked = false;
-                    }
-                }
-
+                // Logic to uncheck others is removed to support multi-selection.
+                // We keeping the visual update of the ComboBox for the most recently checked item.
+                
                 // Get the associated filled region name
                 if (_doriRegionMapping.TryGetValue(currentCheckbox, out string regionName))
                 {
