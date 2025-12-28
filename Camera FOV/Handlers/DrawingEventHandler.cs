@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using Camera_FOV.UI; // Add UI namespace for LinkedModelsSelectionWindow
 using System.Windows.Threading;
 
 namespace Camera_FOV.Handlers
@@ -53,6 +54,7 @@ namespace Camera_FOV.Handlers
     private Element _cameraElement; // For parameter updates
     private double _parameterValue; // For parameter updates
     private Dictionary<string, ElementId> _cameraToFilledRegionMap = new Dictionary<string, ElementId>(); // Track regions per camera+type
+    private List<ElementId> _lastBatchCreatedIds = new List<ElementId>(); // Undo batch tracker
     public bool DrawAngularDimension { get; set; } = false;
     private List<DoriLayerConfig> _doriLayers;
 
@@ -146,15 +148,19 @@ namespace Camera_FOV.Handlers
 
                     if (_doriLayers != null && _doriLayers.Any())
                     {
+                        _lastBatchCreatedIds.Clear();
                         foreach (var layer in _doriLayers)
                         {
-                            DrawLayer(layer.Distance, layer.TypeId, layer.DrawDimension);
+                            ElementId id = DrawLayer(layer.Distance, layer.TypeId, layer.DrawDimension);
+                            if (id != ElementId.InvalidElementId) _lastBatchCreatedIds.Add(id);
                         }
                     }
                     else
                     {
                         // Fallback single mode
-                        DrawLayer(_maxDistance, _filledRegionTypeId, DrawAngularDimension);
+                        ElementId id = DrawLayer(_maxDistance, _filledRegionTypeId, DrawAngularDimension);
+                        _lastBatchCreatedIds.Clear();
+                        if (id != ElementId.InvalidElementId) _lastBatchCreatedIds.Add(id);
                     }
                     break;
 
@@ -164,7 +170,19 @@ namespace Camera_FOV.Handlers
                     break;
 
                 case DrawingAction.UndoFilledRegion:
-                    _drawingTools.DeleteFilledRegion();
+                     if (_lastBatchCreatedIds != null && _lastBatchCreatedIds.Any())
+                    {
+                        foreach (var id in _lastBatchCreatedIds)
+                        {
+                            _drawingTools.DeleteElement(id);
+                        }
+                        _lastBatchCreatedIds.Clear();
+                    }
+                    else
+                    {
+                        // Fallback to old behavior if list is empty (e.g. legacy or restart)
+                        _drawingTools.DeleteFilledRegion();
+                    }
                     break;
 
                 case DrawingAction.UpdateCameraParameter:
@@ -346,6 +364,7 @@ namespace Camera_FOV.Handlers
                     {
                         newRegionType.ForegroundPatternId = solidFillPattern.Id;
                         newRegionType.ForegroundPatternColor = regionColor;
+                        newRegionType.IsMasking = false;
                         createdRegions.Add(regionName);
                     }
                 }
@@ -386,25 +405,62 @@ namespace Camera_FOV.Handlers
             {
                 transaction.Start();
 
-                // Collect walls and structural columns visible in the current view
+                // Define categories to trace
+                List<BuiltInCategory> categories = new List<BuiltInCategory>
+                {
+                    BuiltInCategory.OST_Walls,
+                    BuiltInCategory.OST_StructuralColumns,
+                    BuiltInCategory.OST_Columns,
+                    BuiltInCategory.OST_Doors,
+                    BuiltInCategory.OST_Windows,
+                    BuiltInCategory.OST_CurtainWallPanels,
+                    BuiltInCategory.OST_CurtainWallMullions
+                };
+
+                ElementMulticategoryFilter filter = new ElementMulticategoryFilter(categories);
+
+                // Collect elements visible in the current view
                 var elements = new FilteredElementCollector(doc, _uiDoc.ActiveView.Id)
+                    .WherePasses(filter)
                     .WhereElementIsNotElementType()
-                    .Where(e => e is Wall ||
-                                (e is FamilyInstance fi && fi.Category.Id == new ElementId(BuiltInCategory.OST_StructuralColumns)))
                     .ToList();
 
-                if (!elements.Any())
+                // Check for Linked Models
+                var linkInstances = new FilteredElementCollector(doc, _uiDoc.ActiveView.Id)
+                    .OfClass(typeof(RevitLinkInstance))
+                    .Cast<RevitLinkInstance>()
+                    .ToList();
+
+                List<RevitLinkInstance> selectedLinks = new List<RevitLinkInstance>();
+
+                if (linkInstances.Any())
                 {
-                    TaskDialog.Show("Info", "No walls or structural columns found in the current view.");
+                    // Show selection window
+                    LinkedModelsSelectionWindow window = new LinkedModelsSelectionWindow(linkInstances.Select(l => l.Name).ToList());
+                    bool? result = window.ShowDialog();
+
+                    if (window.Result == LinkedModelsSelectionWindow.SelectionResult.All)
+                    {
+                        selectedLinks.AddRange(linkInstances);
+                    }
+                    else if (window.Result == LinkedModelsSelectionWindow.SelectionResult.Selected)
+                    {
+                        var selectedNames = window.SelectedLinks.Select(l => l.Name).ToHashSet();
+                        selectedLinks.AddRange(linkInstances.Where(l => selectedNames.Contains(l.Name)));
+                    }
+                }
+
+                if (!elements.Any() && !selectedLinks.Any())
+                {
+                    TaskDialog.Show("Info", "No walls, structural columns, or selected linked models found.");
                     transaction.RollBack();
                     return;
                 }
 
-                // Get the "Boundary" line style
-                GraphicsStyle boundaryLineStyle = new FilteredElementCollector(doc)
-                    .OfClass(typeof(GraphicsStyle))
-                    .Cast<GraphicsStyle>()
-                    .FirstOrDefault(gs => gs.Name.Equals("Boundary"));
+                // Get the "Boundary" line style (Subcategory of Lines)
+                Category linesCategory = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
+                Category boundarySubCategory = linesCategory.SubCategories.get_Item("Boundary");
+                GraphicsStyle boundaryLineStyle = boundarySubCategory?.GetGraphicsStyle(GraphicsStyleType.Projection);
 
                 if (boundaryLineStyle == null)
                 {
@@ -415,22 +471,21 @@ namespace Camera_FOV.Handlers
 
                 View view = _uiDoc.ActiveView;
 
+                HashSet<string> drawnCurveHashes = new HashSet<string>();
+
+                // Process Local Elements
                 foreach (var element in elements)
                 {
-                    if (element is Wall)
-                    {
-                        // Use existing logic for walls
-                        ProcessWall(element, view, boundaryLineStyle, doc);
-                    }
-                    else if (element is FamilyInstance column && column.Category.Id == new ElementId(BuiltInCategory.OST_StructuralColumns))
-                    {
-                        // Use bounding box for structural columns
-                        ProcessColumnUsingBoundingBox(column, view, boundaryLineStyle, doc);
-                    }
+                    ProcessElementGeometry(element, view, boundaryLineStyle, doc, drawnCurveHashes);
+                }
+
+                // Process Linked Elements
+                foreach (var link in selectedLinks)
+                {
+                   ProcessLinkedModel(link, view, boundaryLineStyle, doc, drawnCurveHashes);
                 }
 
                 transaction.Commit();
-                MessageBox.Show("Detail lines traced around walls and structural columns successfully.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
         catch (Exception ex)
@@ -439,117 +494,206 @@ namespace Camera_FOV.Handlers
         }
     }
 
-    // Process walls (same logic as before)
-    private void ProcessWall(Element wall, View view, GraphicsStyle boundaryLineStyle, Document doc)
+    // Process elements from a linked Revit/IFC model
+    private void ProcessLinkedModel(RevitLinkInstance link, View hostView, GraphicsStyle boundaryLineStyle, Document hostDoc, HashSet<string> drawnCurveHashes)
     {
-        Options geomOptions = new Options { ComputeReferences = true, DetailLevel = ViewDetailLevel.Fine };
-        GeometryElement geometry = wall.get_Geometry(geomOptions);
+        Document linkedDoc = link.GetLinkDocument();
+        if (linkedDoc == null)
+        {
+            System.Diagnostics.Debug.WriteLine($"Link document is null for: {link.Name}");
+            return;
+        }
+
+        // Get the transform to convert from linked doc coordinates to host doc coordinates
+        Transform linkTransform = link.GetTotalTransform();
+
+        // Define categories to trace in the linked model
+        List<BuiltInCategory> categories = new List<BuiltInCategory>
+        {
+            BuiltInCategory.OST_Walls,
+            BuiltInCategory.OST_StructuralColumns,
+            BuiltInCategory.OST_Columns,
+            BuiltInCategory.OST_Doors,
+            BuiltInCategory.OST_Windows,
+            BuiltInCategory.OST_CurtainWallPanels,
+            BuiltInCategory.OST_CurtainWallMullions
+        };
+
+        ElementMulticategoryFilter filter = new ElementMulticategoryFilter(categories);
+
+        // Collect elements from the linked document
+        var linkedElements = new FilteredElementCollector(linkedDoc)
+            .WherePasses(filter)
+            .WhereElementIsNotElementType()
+            .ToList();
+
+        foreach (var element in linkedElements)
+        {
+            ProcessLinkedElementGeometry(element, linkTransform, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes);
+        }
+    }
+
+    // Process geometry from a linked element, applying the link's transform
+    private void ProcessLinkedElementGeometry(Element linkedElement, Transform linkTransform, View hostView, GraphicsStyle boundaryLineStyle, Document hostDoc, HashSet<string> drawnCurveHashes)
+    {
+        // Get geometry from the linked element (without View context since it's a different document)
+        Options geomOptions = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+        GeometryElement geometry = linkedElement.get_Geometry(geomOptions);
 
         if (geometry == null) return;
 
-        // Use a HashSet to store unique edge references to prevent duplicates
-        HashSet<string> uniqueEdges = new HashSet<string>();
+        // Transform the geometry to host coordinates
+        GeometryElement transformedGeometry = geometry.GetTransformed(linkTransform);
 
+        ProcessGeometryRecursive(transformedGeometry, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes, true);
+    }
+
+    // Unified method to process any element's geometry in the context of the view
+    private void ProcessElementGeometry(Element element, View view, GraphicsStyle boundaryLineStyle, Document doc, HashSet<string> drawnCurveHashes)
+    {
+        // Get geometry specifically for this view (handles cuts, visibility, detail level)
+        // Note: DetailLevel cannot be set when View is provided
+        Options geomOptions = new Options { View = view, ComputeReferences = true };
+        GeometryElement geometry = element.get_Geometry(geomOptions);
+
+        if (geometry == null) return;
+
+        if (geometry == null) return;
+
+        ProcessGeometryRecursive(geometry, view, boundaryLineStyle, doc, drawnCurveHashes, element is RevitLinkInstance);
+    }
+
+    private void ProcessGeometryRecursive(GeometryElement geometry, View view, GraphicsStyle boundaryLineStyle, Document doc, HashSet<string> drawnCurveHashes, bool isLink)
+    {
         foreach (GeometryObject geomObj in geometry)
         {
+            // Filter by Category if it's a Link (to avoid tracing furniture etc.)
+            if (isLink && !IsValidCategory(geomObj, doc))
+            {
+               // If it's a GeometryInstance, we continue because the Category might be on the children
+               if (!(geomObj is GeometryInstance)) 
+                   continue;
+            }
+
             if (geomObj is Solid solid)
             {
-                foreach (Face face in solid.Faces)
+                // Process all edges of the solid
+                foreach (Edge edge in solid.Edges)
                 {
-                    PlanarFace planarFace = face as PlanarFace;
-
-                    if (planarFace != null && Math.Abs(planarFace.FaceNormal.Z) < 0.01) // Only process vertical faces
-                    {
-                        foreach (EdgeArray edgeLoop in planarFace.EdgeLoops)
-                        {
-                            foreach (Edge edge in edgeLoop)
-                            {
-                                // Create a unique identifier for each edge based on its curve reference
-                                string edgeIdentifier = edge.Reference.ElementId.ToString() + "-" + edge.GetHashCode();
-
-                                if (!uniqueEdges.Contains(edgeIdentifier))
-                                {
-                                    uniqueEdges.Add(edgeIdentifier); // Add to the HashSet to avoid duplicates
-
-                                    Curve edgeCurve = edge.AsCurve();
-                                    Curve projectedCurve = ProjectCurveToPlane(edgeCurve, view.SketchPlane.GetPlane(), doc);
-
-                                    if (projectedCurve != null)
-                                    {
-                                        DetailCurve detailCurve = doc.Create.NewDetailCurve(view, projectedCurve);
-                                        detailCurve.LineStyle = boundaryLineStyle;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ProcessCurve(edge.AsCurve(), view, boundaryLineStyle, doc, drawnCurveHashes);
                 }
             }
+            else if (geomObj is Curve curve)
+            {
+                // Skip wall centerlines (they appear as standalone curves)
+                if (isLink && IsCenterline(geomObj))
+                    continue;
+                    
+                // Process standalone curves
+                ProcessCurve(curve, view, boundaryLineStyle, doc, drawnCurveHashes);
+            }
+            else if (geomObj is GeometryInstance instance)
+            {
+                // Recursively process geometry instances
+                // For Links, this is where we dive into the link content
+                ProcessGeometryRecursive(instance.GetInstanceGeometry(), view, boundaryLineStyle, doc, drawnCurveHashes, isLink);
+            }
+        }
+    }
+
+    private bool IsValidCategory(GeometryObject geomObj, Document doc)
+    {
+        ElementId gsId = geomObj.GraphicsStyleId;
+        if (gsId == ElementId.InvalidElementId) return true; // Default to true if no style (safe fallback)
+
+        GraphicsStyle gs = doc.GetElement(gsId) as GraphicsStyle;
+        
+        // If we can't resolve the style (e.g., from a linked doc), allow it
+        // This is common for linked models where IDs don't match the host
+        if (gs == null) return true;
+        
+        if (gs.GraphicsStyleCategory != null)
+        {
+             // Check Parent Category (e.g. "Walls", "Doors")
+             // Note: Subcategories (like "Cut") are children of the Main Category
+             Category cat = gs.GraphicsStyleCategory;
+             
+             // Traverse up to find main category
+             while (cat.Parent != null)
+             {
+                 cat = cat.Parent;
+             }
+
+             BuiltInCategory bic = (BuiltInCategory)(int)cat.Id.Value;
+             return IsSupportedCategory(bic);
+        }
+        return true;
+    }
+
+    private bool IsSupportedCategory(BuiltInCategory bic)
+    {
+        return bic == BuiltInCategory.OST_Walls ||
+               bic == BuiltInCategory.OST_StructuralColumns ||
+               bic == BuiltInCategory.OST_Columns ||
+               bic == BuiltInCategory.OST_Doors ||
+               bic == BuiltInCategory.OST_Windows ||
+               bic == BuiltInCategory.OST_CurtainWallPanels ||
+               bic == BuiltInCategory.OST_CurtainWallMullions;
+    }
+
+    // Check if a geometry object represents a centerline (to be filtered out)
+    private bool IsCenterline(GeometryObject geomObj)
+    {
+        // Centerlines are typically curves, not solids
+        // For linked geometry, we skip ALL standalone curves since centerlines appear this way
+        // The actual boundary geometry comes from Solid edges, not standalone curves
+        return geomObj is Curve;
+    }
+
+    private void ProcessCurve(Curve curve, View view, GraphicsStyle boundaryLineStyle, Document doc, HashSet<string> drawnCurveHashes)
+    {
+        if (curve == null) return;
+
+        try
+        {
+            Curve projectedCurve = ProjectCurveToPlane(curve, view.SketchPlane.GetPlane(), doc);
+
+            if (projectedCurve != null)
+            {
+                // Generate hash from PROJECTED curve to deduplicate 2D lines
+                string hash = GenerateCurveHash(projectedCurve);
+
+                if (!drawnCurveHashes.Contains(hash))
+                {
+                    drawnCurveHashes.Add(hash);
+
+                    DetailCurve detailCurve = doc.Create.NewDetailCurve(view, projectedCurve);
+                    detailCurve.LineStyle = boundaryLineStyle;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Ignore projection errors for individual curves (e.g. degenerate curves)
+             System.Diagnostics.Debug.WriteLine($"Failed to process curve: {ex.Message}");
         }
     }
 
     // Helper method to generate a hash for a curve based on its start and end points
     private string GenerateCurveHash(Curve curve)
     {
-        XYZ start = curve.GetEndPoint(0);
-        XYZ end = curve.GetEndPoint(1);
+        XYZ p1 = curve.GetEndPoint(0);
+        XYZ p2 = curve.GetEndPoint(1);
 
-        // Ensure the hash is independent of the curve direction
-        return start.IsAlmostEqualTo(end) ? $"{start}-{end}" : $"{end}-{start}";
-    }
+        // Format points with precision to avoid floating point issues
+        string s1 = $"{Math.Round(p1.X, 4)},{Math.Round(p1.Y, 4)},{Math.Round(p1.Z, 4)}";
+        string s2 = $"{Math.Round(p2.X, 4)},{Math.Round(p2.Y, 4)},{Math.Round(p2.Z, 4)}";
 
-    // Process structural columns using bounding box
-    private void ProcessColumnUsingBoundingBox(FamilyInstance column, View view, GraphicsStyle boundaryLineStyle, Document doc)
-    {
-        BoundingBoxXYZ bbox = column.get_BoundingBox(view);
-
-        if (bbox == null)
-        {
-            TaskDialog.Show("Error", "Bounding box for the column is null.");
-            return;
-        }
-
-        // Get the plane of the current view
-        Plane viewPlane = view.SketchPlane?.GetPlane();
-        if (viewPlane == null)
-        {
-            TaskDialog.Show("Error", "Active view does not have a valid sketch plane.");
-            return;
-        }
-
-        // Project bounding box corners onto the sketch plane
-        XYZ min = ProjectPointToPlane(bbox.Min, viewPlane);
-        XYZ max = ProjectPointToPlane(bbox.Max, viewPlane);
-
-        // Create boundary lines from the projected bounding box edges
-        List<Curve> boundingBoxEdges = new List<Curve>
-{
-    ProjectCurveToPlane(Line.CreateBound(bbox.Min, new XYZ(bbox.Max.X, bbox.Min.Y, bbox.Min.Z)), viewPlane, doc),
-    ProjectCurveToPlane(Line.CreateBound(new XYZ(bbox.Max.X, bbox.Min.Y, bbox.Min.Z), bbox.Max), viewPlane, doc),
-    ProjectCurveToPlane(Line.CreateBound(bbox.Max, new XYZ(bbox.Min.X, bbox.Max.Y, bbox.Max.Z)), viewPlane, doc),
-    ProjectCurveToPlane(Line.CreateBound(new XYZ(bbox.Min.X, bbox.Max.Y, bbox.Max.Z), bbox.Min), viewPlane, doc)
-};
-
-
-        foreach (Curve edge in boundingBoxEdges)
-        {
-            try
-            {
-                // Validate the curve is planar before creating DetailCurve
-                if (!IsCurvePlanarToSketchPlane(edge, viewPlane))
-                {
-                    TaskDialog.Show("Warning", "Curve is not planar to the sketch plane.");
-                    continue;
-                }
-
-                DetailCurve detailCurve = doc.Create.NewDetailCurve(view, edge);
-                detailCurve.LineStyle = boundaryLineStyle;
-            }
-            catch (Exception ex)
-            {
-                TaskDialog.Show("Error", $"Failed to create boundary line for column: {ex.Message}");
-            }
-        }
+        // Sort to ensure direction invariance
+        if (string.Compare(s1, s2) < 0)
+            return $"{s1}|{s2}";
+        else
+            return $"{s2}|{s1}";
     }
 
     private Curve ProjectCurveToPlane(Curve curve, Plane plane, Document doc)
@@ -660,7 +804,7 @@ namespace Camera_FOV.Handlers
         }
     }
 
-    private void DrawLayer(double distance, ElementId typeId, bool drawDimension)
+    private ElementId DrawLayer(double distance, ElementId typeId, bool drawDimension)
     {
         string compositeKey = (_cameraElement != null) ? _cameraElement.Id.ToString() : "NoCam";
 
@@ -677,7 +821,7 @@ namespace Camera_FOV.Handlers
         }
 
         _drawingTools.SetParameters(_position, distance, _rotationAngle, _fovAngle, typeId);
-        ElementId newRegionId = _drawingTools.DrawFilledRegion(1.0); // Use 1.0 degree step for geometry generation
+        ElementId newRegionId = _drawingTools.DrawFilledRegion(_sliderResolution); // Use slider resolution
 
         if (newRegionId != ElementId.InvalidElementId)
         {
@@ -689,6 +833,7 @@ namespace Camera_FOV.Handlers
                 _drawingTools.CreateAngularDimension(newRegionId);
             }
         }
+        return newRegionId;
     }
 
     public string GetName()

@@ -196,8 +196,6 @@ namespace Camera_FOV
             _drawingEventHandler.SetMainWindow(this);
             _externalEvent = ExternalEvent.Create(_drawingEventHandler);
 
-            PopulateFilledRegionComboBox();
-
             LoadSettings();
 
             // Set initialization complete
@@ -742,36 +740,7 @@ namespace Camera_FOV
             }
         }
 
-        // Populate Filled Region ComboBox on window load
-        private void PopulateFilledRegionComboBox()
-        {
-            try
-            {
-                // Get all Filled Region Types
-                var filledRegionTypes = new FilteredElementCollector(_doc)
-                    .OfClass(typeof(FilledRegionType))
-                    .Cast<FilledRegionType>()
-                    .Where(regionType => regionType.Name.Contains("dori_")) // Filter names containing "dori_"
-                    .ToList();
 
-                // Clear ComboBox and add filtered types
-                FilledRegionComboBox.Items.Clear();
-                foreach (var regionType in filledRegionTypes)
-                {
-                    FilledRegionComboBox.Items.Add(regionType.Name);
-                }
-
-                // Set default selection if available
-                if (FilledRegionComboBox.Items.Count > 0)
-                    FilledRegionComboBox.SelectedIndex = 0;
-                else
-                    MessageBox.Show("No Filled Regions found with 'dori_' in their names.\nThese regions are needed for the drawing process.\nYou can create them manualy or use the &quot;Create filled region types&quot; button in the setup section.", "No Matches", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to populate Filled Regions: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
         private void FilledRegionButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -851,7 +820,7 @@ namespace Camera_FOV
                     rotationAngle,
                     fovAngle,
                     doriLayers.First().TypeId, // Legacy type
-                    resolution,
+                    _sliderResolution, // Corrected: Use slider value (degrees), not camera pixels
                     _selectedCameraElement,
                     double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double val) ? val : 0,
                     doriLayers // New list
@@ -989,22 +958,8 @@ namespace Camera_FOV
         {
             if (sender is CheckBox currentCheckbox)
             {
-                // Logic to uncheck others is removed to support multi-selection.
-                // We keeping the visual update of the ComboBox for the most recently checked item.
-                
-                // Get the associated filled region name
-                if (_doriRegionMapping.TryGetValue(currentCheckbox, out string regionName))
-                {
-                    // Find and select the corresponding filled region in the ComboBox
-                    foreach (var item in FilledRegionComboBox.Items)
-                    {
-                        if (item.ToString().Contains(regionName))
-                        {
-                            FilledRegionComboBox.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
+                // Multi-selection is supported now.
+                // ComboBox synchronization logic removed as ComboBox is deleted.
             }
         }
 
@@ -1039,7 +994,7 @@ namespace Camera_FOV
         }
         public void NotifyFilledRegionsCreated()
         {
-            Dispatcher.Invoke(() => PopulateFilledRegionComboBox());
+            // FilledRegionComboBox logic removed.
         }
 
         private void PlusFourFiveDegree_Click(object sender, RoutedEventArgs e) => UpdateRotationAngle(45);

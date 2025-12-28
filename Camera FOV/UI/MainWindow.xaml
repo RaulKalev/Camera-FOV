@@ -8,7 +8,7 @@
     Width="285"
     SizeToContent="Height"
     MinWidth="285"
-    MinHeight="300"
+    MinHeight="250"
     AllowsTransparency="True"
     Background="Transparent"
     WindowStyle="None">
@@ -318,7 +318,7 @@
                             Background="{DynamicResource SecondaryBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             Click="SelectElementsButton_Click"
-                            Content="Vali kaamera"
+                            Content="Select Camera"
                             FontSize="14"
                             FontWeight="Bold"
                             Foreground="{DynamicResource ForegroundBrush}">
@@ -373,7 +373,7 @@
                                     FontSize="14"
                                     FontWeight="Bold"
                                     Foreground="{DynamicResource ForegroundBrush}"
-                                    Text="Kaamera parameetrid" />
+                                    Text="Camera Parameters" />
 
                                 <!--  Camera Parameters  -->
                                 <StackPanel Width="230" Margin="0,5,5,5">
@@ -383,7 +383,7 @@
                                             Width="127"
                                             VerticalAlignment="Center"
                                             Foreground="{DynamicResource ForegroundBrush}"
-                                            Text="Vaatenurk:" />
+                                            Text="Field of View:" />
                                         <TextBox
                                             x:Name="FOVAngleTextBox"
                                             Width="80"
@@ -406,7 +406,7 @@
                                             Width="127"
                                             VerticalAlignment="Center"
                                             Foreground="{DynamicResource ForegroundBrush}"
-                                            Text="Horisontaalne reso:" />
+                                            Text="Horizontal Res:" />
                                         <!--  Read-only TextBox to display the selected value  -->
 
                                         <ComboBox
@@ -444,7 +444,7 @@
                                             Width="127"
                                             VerticalAlignment="Center"
                                             Foreground="{DynamicResource ForegroundBrush}"
-                                            Text="Max kaugus:" />
+                                            Text="Max Distance:" />
                                         <TextBox
                                             x:Name="MaxDistanceTextBox"
                                             Width="80"
@@ -477,7 +477,7 @@
                                     FontSize="14"
                                     FontWeight="Bold"
                                     Foreground="{DynamicResource ForegroundBrush}"
-                                    Text="Pööra kaamerat" />
+                                    Text="Rotate Camera" />
 
                                 <!--  Rotation Angle Input  -->
                                 <StackPanel Margin="0,5,0,5" Orientation="Horizontal">
@@ -485,7 +485,7 @@
                                         Width="127"
                                         VerticalAlignment="Center"
                                         Foreground="{DynamicResource ForegroundBrush}"
-                                        Text="Pöörde nurk:" />
+                                        Text="Rotation Angle:" />
                                     <TextBox
                                         x:Name="RotationAngleTextBox"
                                         Width="80"
@@ -507,7 +507,7 @@
                                 <TextBlock
                                     Margin="0,0,0,3"
                                     Foreground="{DynamicResource ForegroundBrush}"
-                                    Text="Keera nurka:" />
+                                    Text="Quick Rotate:" />
                                 <Button
                                     x:Name="minusOneDegree"
                                     Width="20"
@@ -774,7 +774,7 @@
                                 Background="{DynamicResource SecondaryBackgroundBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 Click="FilledRegionButton_Click"
-                                Content="Joonista"
+                                Content="Draw"
                                 FontSize="14"
                                 FontWeight="Bold"
                                 Foreground="{DynamicResource ForegroundBrush}">
@@ -829,7 +829,7 @@
                                     FontSize="14"
                                     FontWeight="Bold"
                                     Foreground="{DynamicResource ForegroundBrush}"
-                                    Text="DORI valikud" />
+                                    Text="DORI Options" />
 
                                 <!--  Checkboxes  -->
                                 <CheckBox
@@ -867,42 +867,11 @@
                             </StackPanel>
                         </materialDesign:Card>
 
-                        <materialDesign:Card
-                            Margin="0,5,0,0"
-                            Padding="10"
-                            Background="Transparent"
-                            BorderBrush="Gray"
-                            BorderThickness="1">
-                            <StackPanel Margin="0,-5,0,5">
-                                <!--  Header  -->
-                                <TextBlock
-                                    Width="230"
-                                    FontSize="14"
-                                    FontWeight="Bold"
-                                    Foreground="{DynamicResource ForegroundBrush}"
-                                    Text="Filled Region valikud" />
 
-                                <!--  ComboBox for Filled Regions  -->
-                                <StackPanel Margin="4,5,0,0" Orientation="Horizontal">
-                                    <TextBlock
-                                        Width="96"
-                                        VerticalAlignment="Center"
-                                        Foreground="{DynamicResource ForegroundBrush}"
-                                        Text="Filled Regions:" />
-                                    <ComboBox
-                                        x:Name="FilledRegionComboBox"
-                                        Width="139"
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource DarkThemeComboBox}"
-                                        ToolTip="Select a filled region type" />
-                                </StackPanel>
-
-                            </StackPanel>
-                        </materialDesign:Card>
 
                         <!--  Settings Button  -->
                         <!--  Settings Button Container  -->
-                        <Grid HorizontalAlignment="Stretch" Margin="0,5,0,10">
+                        <Grid HorizontalAlignment="Stretch" Margin="0,0,0,0">
                             <Button
                                 x:Name="SettingsButton"
                                 Width="25"

@@ -17,6 +17,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.ComboBox.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Slider.xaml" />
                 <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Dark.xaml" />
             </ResourceDictionary.MergedDictionaries>
             
@@ -166,6 +167,8 @@
                                 TickFrequency="0.1"
                                 ValueChanged="ValueSlider_ValueChanged"
                                 Value="0.5" 
+                                Style="{StaticResource MaterialDesignSlider}"
+                                materialDesign:RippleAssist.IsDisabled="True"
                                 Foreground="{DynamicResource ForegroundBrush}"/>
                     </StackPanel>
                     

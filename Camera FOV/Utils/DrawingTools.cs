@@ -139,148 +139,140 @@ namespace Camera_FOV.Utils
                 return ElementId.InvalidElementId;
             }
 
-            using (Transaction trans = new Transaction(_doc, "Draw Filled Region"))
+            // Retry logic: If fine resolution fails, try coarser resolutions
+            var attempts = new List<Tuple<double, bool>>();
+            attempts.Add(Tuple.Create(resolution, false));
+            attempts.Add(Tuple.Create(resolution, true));
+            double[] fallbacks = { 0.5, 1.0, 2.0, 5.0 };
+            foreach (var fb in fallbacks)
             {
-                try
+                if (fb > resolution)
                 {
-                    if (trans.Start() != TransactionStatus.Started)
-                        throw new InvalidOperationException("Failed to start transaction.");
+                    attempts.Add(Tuple.Create(fb, false));
+                    attempts.Add(Tuple.Create(fb, true));
+                }
+            }
 
-                    // Locate the "Invisible Lines" graphics style
-                    GraphicsStyle invisibleLineStyle = new FilteredElementCollector(_doc)
-                        .OfClass(typeof(GraphicsStyle))
-                        .Cast<GraphicsStyle>()
-                        .FirstOrDefault(gs => gs.Name.Equals("<Invisible lines>", StringComparison.OrdinalIgnoreCase));
+            string lastError = "";
+            XYZ basePosition = _currentPosition;
 
-                    if (invisibleLineStyle == null)
-                    {
-                        throw new InvalidOperationException("<Invisible lines> style not found. Ensure it exists in the project.");
-                    }
+            try
+            {
+                foreach (var attempt in attempts)
+                {
+                    double res = attempt.Item1;
+                    bool useOffset = attempt.Item2;
 
-                    List<FOVPoint> fovPoints;
-                    if (_fovAngle == 360.0)
+                    _currentPosition = basePosition;
+                    if (useOffset)
                     {
-                        fovPoints = CalculateFOVPointsForCircle(resolution);
+                        double rad = _rotationAngle * Math.PI / 180.0;
+                        XYZ dir = new XYZ(Math.Cos(rad), Math.Sin(rad), 0);
+                        _currentPosition = basePosition + dir * (10.0 / 304.8);
                     }
-                    else
+                using (Transaction trans = new Transaction(_doc, "Draw Filled Region"))
+                {
+                    try
                     {
-                        fovPoints = CalculateFOVPointsWithIntersection(resolution);
-                    }
+                        if (trans.Start() != TransactionStatus.Started)
+                            throw new InvalidOperationException("Failed to start transaction.");
 
-                    // Ensure Planarity: Project all points to the View's Sketch Plane
-                    // For 2D Floor Plans, the sketch plane Z is crucial.
-                    double planeZ = _currentPosition.Z; // Default to camera Z
-                    if (_currentView.SketchPlane != null)
-                    {
-                        planeZ = _currentView.SketchPlane.GetPlane().Origin.Z;
-                    }
-                    else if (_currentView.GenLevel != null)
-                    {
-                        planeZ = _currentView.GenLevel.Elevation;
-                    }
-                    
-                    foreach (var fp in fovPoints)
-                    {
-                         fp.Point = new XYZ(fp.Point.X, fp.Point.Y, planeZ);
-                    }
+                        // 1. Get Style
+                        GraphicsStyle invisibleLineStyle = new FilteredElementCollector(_doc)
+                            .OfClass(typeof(GraphicsStyle))
+                            .Cast<GraphicsStyle>()
+                            .FirstOrDefault(gs => gs.Name.Equals("<Invisible lines>", StringComparison.OrdinalIgnoreCase));
 
-                    // Try 1: Simplified Boundary
-                    bool success = false;
-                    string diagnosticMessage = "";
-                    try 
-                    {
-                        CurveLoop boundary = SimplifyBoundary(fovPoints);
-                        
-                        // Diagnostic info
-                        int curveCount = boundary.Count();
-                        bool isValid = boundary.IsValidObject;
-                        bool isClosed = !boundary.IsOpen();
-                        
-                        diagnosticMessage = $"SimplifyBoundary Result:\n" +
-                                           $"- Curve Count: {curveCount}\n" +
-                                           $"- Is Valid: {isValid}\n" +
-                                           $"- Is Closed: {isClosed}\n" +
-                                           $"- FOV Points: {fovPoints.Count}\n" +
-                                           $"- MaxDistance Points: {fovPoints.Count(p => p.IsMaxDistance)}\n" +
-                                           $"- HitGeometry Points: {fovPoints.Count(p => p.HitGeometry != null)}";
-                        
-                        if (boundary.IsValidObject && !boundary.IsOpen() && boundary.Count() >= 3)
-                        {
-                            IList<CurveLoop> boundaryLoops = new List<CurveLoop> { boundary };
-                            _currentFilledRegion = FilledRegion.Create(_doc, _filledRegionTypeId, _currentView.Id, boundaryLoops);
-                            success = true;
-                            diagnosticMessage += "\n\nSimplified boundary SUCCESS!";
-                        }
+                        if (invisibleLineStyle == null)
+                            throw new InvalidOperationException("<Invisible lines> style not found.");
+
+                        // 2. Calculate Points
+                        List<FOVPoint> fovPoints;
+                        if (_fovAngle == 360.0)
+                            fovPoints = CalculateFOVPointsForCircle(res);
                         else
+                            fovPoints = CalculateFOVPointsWithIntersection(res);
+
+                        // 3. Project to Plane (Z)
+                        double planeZ = _currentPosition.Z;
+                        if (_currentView.SketchPlane != null)
+                            planeZ = _currentView.SketchPlane.GetPlane().Origin.Z;
+                        else if (_currentView.GenLevel != null)
+                            planeZ = _currentView.GenLevel.Elevation;
+
+                        foreach (var fp in fovPoints)
+                            fp.Point = new XYZ(fp.Point.X, fp.Point.Y, planeZ);
+
+                        // 4. Generate Boundary
+                        bool success = false;
+                        FilledRegion region = null;
+
+                        // Try A: Smart Simplify (Arc/Line reconstruction)
+                        try
                         {
-                            diagnosticMessage += "\n\nSimplified boundary FAILED validation.";
+                            CurveLoop boundary = SimplifyBoundary(fovPoints);
+                            if (boundary.IsValidObject && !boundary.IsOpen() && boundary.Count() >= 3)
+                            {
+                                region = FilledRegion.Create(_doc, _filledRegionTypeId, _currentView.Id, new List<CurveLoop> { boundary });
+                                success = true;
+                            }
                         }
+                        catch { /* Ignore, proceed to fallback */ }
+
+                        // Try B: Fallback (Simple Polygon)
+                        if (!success)
+                        {
+                            try
+                            {
+                                CurveLoop fallback = CreateFallbackBoundary(fovPoints);
+                                if (fallback.IsValidObject && !fallback.IsOpen() && fallback.Count() >= 3)
+                                {
+                                    region = FilledRegion.Create(_doc, _filledRegionTypeId, _currentView.Id, new List<CurveLoop> { fallback });
+                                    success = true;
+                                }
+                            }
+                            catch { /* Both failed */ }
+                        }
+
+                        if (success && region != null)
+                        {
+                            _currentFilledRegion = region;
+
+                            // Apply invisible lines
+                            var dependentIds = region.GetDependentElements(null);
+                            foreach (var id in dependentIds)
+                            {
+                                if (_doc.GetElement(id) is CurveElement ce)
+                                    ce.LineStyle = invisibleLineStyle;
+                            }
+
+                            if (trans.Commit() == TransactionStatus.Committed)
+                            {
+                                return region.Id; // SUCCESS
+                            }
+                        }
+                        
+                        // If we are here, transaction failed or wasn't committed.
+                        // Rollback is automatic with 'using' if not committed, or we can explicit.
+                        // But if trans.Start() succeeded we should check status? 
+                        // If we didn't commit, we just continue loop.
                     }
                     catch (Exception ex)
                     {
-                        // Failed to create simplified region (e.g. self-intersecting or invalid)
-                        diagnosticMessage += $"\n\nSimplified boundary EXCEPTION: {ex.Message}";
-                        success = false;
+                        lastError = ex.Message;
                     }
-
-
-                    // Try 2: Fallback Boundary (Simple Polygon)
-                    if (!success)
-                    {
-                         try 
-                         {
-                            CurveLoop fallbackBoundary = CreateFallbackBoundary(fovPoints);
-                            if (fallbackBoundary.IsValidObject && !fallbackBoundary.IsOpen() && fallbackBoundary.Count() >= 3)
-                            {
-                                IList<CurveLoop> boundaryLoops = new List<CurveLoop> { fallbackBoundary };
-                                _currentFilledRegion = FilledRegion.Create(_doc, _filledRegionTypeId, _currentView.Id, boundaryLoops);
-                                success = true;
-                            }
-                         }
-                         catch 
-                         {
-                             // Fallback failed
-                             success = false;
-                         }
-                    }
-                    
-                    if (!success)
-                    {
-                        TaskDialog.Show("Warning", "Could not generate a valid filled region boundary. The FOV geometry might be too small, complex, or self-intersecting.");
-                        // Do NOT throw, allow the transaction to commit partial work (like the DetailLine) or just exit cleanly.
-                        // Actually, if we didn't create the filled region, we should probably just return.
-                    }
-
-                    // Assign the "Invisible Lines" style to the boundary curves
-                    if (success && _currentFilledRegion != null)
-                    {
-                        var dependentElements = _currentFilledRegion.GetDependentElements(null);
-                        foreach (var dependentId in dependentElements)
-                        {
-                            var element = _doc.GetElement(dependentId);
-                            if (element is CurveElement curveElement)
-                            {
-                                curveElement.LineStyle = invisibleLineStyle;
-                            }
-                        }
-                    }
-
-                    if (trans.Commit() != TransactionStatus.Committed)
-                    {
-                        TaskDialog.Show("Error", "Failed to commit transaction.");
-                        return ElementId.InvalidElementId;
-                    }
-                    
-                    return (_currentFilledRegion != null) ? _currentFilledRegion.Id : ElementId.InvalidElementId;
                 }
-                catch (Exception ex)
-                {
-                   if (trans.HasStarted())
-                        trans.RollBack();
-                    TaskDialog.Show("Error", $"Error in DrawFilledRegion: {ex.Message}");
-                    return ElementId.InvalidElementId;
+                // Loop continues to next coarser resolution
                 }
             }
+            finally
+            {
+                _currentPosition = basePosition;
+            }
+
+            // If all attempts fail
+            TaskDialog.Show("Warning", $"Could not generate a valid filled region boundary even after relaxing resolution.\nLast Error: {lastError}\n\nThe FOV geometry might be too complex or self-intersecting.");
+            return ElementId.InvalidElementId;
         }
 
         public void DeleteElement(ElementId elementId)

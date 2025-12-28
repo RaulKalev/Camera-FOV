@@ -17,6 +17,8 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
   - **Observation** (63px/m)
   - **Recognition** (125px/m)
   - **Identification** (250px/m)
+- **Multi-Zone Visualization**: Draw multiple DORI regions simultaneously to analyze all coverage zones at once.
+- **Boundary Tracing**: Automatically traces walls and columns from both local and linked models to create precise visual boundaries.
 - **Manual Boundary Definition**: Uses detail lines to allow users to manually define visual boundaries for the FOV.
 - **Smart Rotation**: Auto-detects camera orientation from Revit families and supports manual rotation offsets.
 - **Customizable**: Adjustable max distance, FOV angle, and resolution settings.
