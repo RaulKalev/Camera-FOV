@@ -652,25 +652,27 @@ namespace Camera_FOV.Handlers
         }
 
         Document doc = _cameraElement.Document;
-        Parameter param = _cameraElement.LookupParameter("Pööra Kaamerat");
         
-        if (param == null)
-        {
-            TaskDialog.Show("Debug", "Parameter 'Pööra Kaamerat' not found");
-            return;
-        }
-
-        if (param.IsReadOnly)
-        {
-            TaskDialog.Show("Debug", "Parameter is read-only");
-            return;
-        }
-        
-        using (Transaction trans = new Transaction(doc, "Update Camera Rotation"))
+        using (Transaction trans = new Transaction(doc, "Update Camera Parameters"))
         {
             trans.Start();
-            double rotationRadians = _parameterValue * (Math.PI / 180.0);
-            param.Set(rotationRadians);
+
+            // 1. Update "Pööra Kaamerat" (Rotation)
+            Parameter rotationParam = _cameraElement.LookupParameter("Pööra Kaamerat");
+            if (rotationParam != null && !rotationParam.IsReadOnly)
+            {
+                double rotationRadians = _parameterValue * (Math.PI / 180.0);
+                rotationParam.Set(rotationRadians);
+            }
+
+            // 2. Update "Kaamera nurk" (FOV Override)
+            Parameter fovParam = _cameraElement.LookupParameter("Kaamera nurk");
+            if (fovParam != null && !fovParam.IsReadOnly)
+            {
+                double fovRadians = _fovAngle * (Math.PI / 180.0);
+                fovParam.Set(fovRadians);
+            }
+
             trans.Commit();
         }
     }
