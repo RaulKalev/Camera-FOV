@@ -628,30 +628,38 @@ namespace Camera_FOV
                         // Display only the user rotation in UI (base rotation is applied silently)
                         RotationAngleTextBox.Text = userRotation.ToString("F0", CultureInfo.InvariantCulture);
 
-                        // Read "Vaatenurk" or "Kaamera nurk" parameter (Field of View)
-                        // Priority: Vaatenurk (Inst) -> Kaamera nurk (Inst) -> Kaamera nurk (Type)
+                        // FOV Logic
+                        // Priority 1: "Kaamera nurk" (Instance) - Manual Override if > 0
+                        // Priority 2: "Vaatenurk" (Instance) - Standard
+                        // Priority 3: "Vaatenurk" (Type) - Standard Fallback
+
                         double finalFovDegrees = 0;
                         bool fovFound = false;
 
-                        // 1. Vaatenurk (Instance)
-                        if (element.LookupParameter("Vaatenurk") is Parameter fovParam)
+                        // 1. Check "Kaamera nurk" (Override)
+                        Parameter knInst = element.LookupParameter("Kaamera nurk");
+                        if (knInst != null)
                         {
-                             finalFovDegrees = fovParam.AsDouble() * (180.0 / Math.PI);
-                             fovFound = true;
+                            double val = knInst.AsDouble();
+                            if (Math.Abs(val) > 0.001)
+                            {
+                                finalFovDegrees = val * (180.0 / Math.PI);
+                                fovFound = true;
+                            }
                         }
-                        
-                        // 2. Kaamera nurk (Instance)
+
+                        // 2. Check "Vaatenurk" (Instance)
                         if (!fovFound)
                         {
-                             Parameter knInst = element.LookupParameter("Kaamera nurk");
-                             if (knInst != null)
+                             Parameter vnInst = element.LookupParameter("Vaatenurk");
+                             if (vnInst != null)
                              {
-                                 finalFovDegrees = knInst.AsDouble() * (180.0 / Math.PI);
+                                 finalFovDegrees = vnInst.AsDouble() * (180.0 / Math.PI);
                                  fovFound = true;
                              }
                         }
 
-                        // 3. Kaamera nurk (Type)
+                        // 3. Check "Vaatenurk" (Type)
                         if (!fovFound)
                         {
                             ElementId typeId = element.GetTypeId();
@@ -659,10 +667,10 @@ namespace Camera_FOV
                             {
                                 if (_doc.GetElement(typeId) is ElementType elementType)
                                 {
-                                    Parameter knType = elementType.LookupParameter("Kaamera nurk");
-                                    if (knType != null)
+                                    Parameter vnType = elementType.LookupParameter("Vaatenurk");
+                                    if (vnType != null)
                                     {
-                                        finalFovDegrees = knType.AsDouble() * (180.0 / Math.PI);
+                                        finalFovDegrees = vnType.AsDouble() * (180.0 / Math.PI);
                                         fovFound = true;
                                     }
                                 }
