@@ -615,12 +615,31 @@ namespace Camera_FOV
                             userRotation = rotationRadians * (180.0 / Math.PI); // Convert to degrees
                             foundParam = true;
                         }
-                        else if (element.LookupParameter("Kaamera nurk") is Parameter rotationAngleParameter)
+                        else
                         {
-                            // Fallback to old parameter
-                            double rotationRadians = rotationAngleParameter.AsDouble();
-                            userRotation = rotationRadians * (180.0 / Math.PI);
-                            foundParam = true;
+                            // Fallback to old parameter: "Kaamera nurk"
+                            // Check Instance first
+                            Parameter rotationParam = element.LookupParameter("Kaamera nurk");
+                            
+                            // If not on Instance, check Type
+                            if (rotationParam == null)
+                            {
+                                ElementId typeId = element.GetTypeId();
+                                if (typeId != null && typeId != ElementId.InvalidElementId)
+                                {
+                                    if (_doc.GetElement(typeId) is ElementType elementType)
+                                    {
+                                        rotationParam = elementType.LookupParameter("Kaamera nurk");
+                                    }
+                                }
+                            }
+                            
+                            if (rotationParam != null)
+                            {
+                                double rotationRadians = rotationParam.AsDouble();
+                                userRotation = rotationRadians * (180.0 / Math.PI);
+                                foundParam = true;
+                            }
                         }
 
 
