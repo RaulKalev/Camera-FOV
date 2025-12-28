@@ -7,6 +7,8 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
 - **Revit 2024**
 - **Revit 2026**
 
+*Note: The plugin has been tested in these versions but may work in other versions if the Revit API supports the required features.*
+
 ## Features
 
 - **FOV Visualization**: Generates precise 2D filled regions representing the camera's coverage area directly in your Revit views.
@@ -40,12 +42,12 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
 The plugin works with elements in the **Security Devices** category (`OST_SecurityDevices`).
 For full functionality, the families should contain the following parameters (Parameter names are configurable in Settings):
 
-| Parameter Name | Data Type | Description |
-| :--- | :--- | :--- |
-| **Vaatenurk** | Angle | The camera's Field of View angle (in degrees). |
-| **Horisontaalne Resolutsioon** | Text or Integer | The sensor's horizontal resolution (e.g. "1920" or "1920 px"). |
-| **Pööra Kaamerat** | Angle | (Optional) Manual rotation offset for the camera (in degrees). |
-| **Kaamera nurk** | Angle | (Optional) Legacy fallback for rotation offset. |
+| Parameter Name | Scope | Data Type | Description |
+| :--- | :--- | :--- | :--- |
+| **Vaatenurk** | Instance/Type | Angle | The camera's Field of View angle (in degrees). |
+| **Horisontaalne Resolutsioon** | Instance/Type | Text or Integer | The sensor's horizontal resolution (e.g. "1920" or "1920 px"). |
+| **Pööra Kaamerat** | Instance | Angle | (Optional) Manual rotation offset for the camera (in degrees). |
+| **Kaamera nurk** | Instance | Angle | (Optional) Manual Field of view angle override. |
 
 ## Technical Overview
 
