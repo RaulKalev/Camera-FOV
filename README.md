@@ -47,7 +47,7 @@ For full functionality, the families should contain the following parameters (Pa
 | **Vaatenurk** | Instance/Type | Angle | The camera's Field of View angle (in degrees). |
 | **Horisontaalne Resolutsioon** | Instance/Type | Text | The sensor's horizontal resolution (e.g. "1920" or "1920 px"). |
 | **Pööra Kaamerat** | Instance | Angle | (Optional) Manual rotation offset for the camera (in degrees). |
-| **Kaamera nurk** | Instance | Angle | (Optional) Manual Field of view angle override. |
+| **Kaamera nurk** | Instance | Angle | (Optional) Manual Field of View angle override. |
 
 ## Technical Overview
 
