@@ -26,8 +26,17 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
 
 ## Installation
 
-1. Build the solution using Visual Studio 2022.
-2. Load the resulting assembly into Revit using the Add-in Manager or by creating a `.addin` manifest file.
+## Installation
+**Recommended:**
+1.  Go to the [Releases](https://github.com/RaulKalev/Camera-FOV/releases) page.
+2.  Download the **CameraFOV_Installer.exe**.
+3.  Run the installer (it will automatically detect Revit 2024 and 2026 locations).
+
+**Manual Installation (Advanced/Unsupported Versions):**
+If use older Revit versions, you can attempt to install manually, but **this is untested and proceeded at your own risk**.
+1.  Copy the `CameraFOV.addin` file to `%ProgramData%/Autodesk/Revit/Addins/[Year]/`.
+2.  Copy the `Camera FOV` folder (containing DLLs) to the same location.
+3.  Ensure you use the correct .NET version (.NET 4.8 for Revit < 2025).
 
 ## Usage
 

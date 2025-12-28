@@ -17,7 +17,7 @@
 
 # Revit Add-in specific
 *_AddIn_temp/
-*.addin
+
 
 # Settings
 Settings.settings
@@ -30,3 +30,6 @@ App.config
 # Temporary files
 *.tmp
 *_wpftmp.csproj
+
+# Installer
+Installer/
