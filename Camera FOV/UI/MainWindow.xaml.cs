@@ -1,6 +1,7 @@
 ﻿using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -608,41 +609,14 @@ namespace Camera_FOV
                         double userRotation = 0;
                         bool foundParam = false;
                         
-                        // Strict check: only set offset if Pööra Kaamerat exists and is > 0
-                        if (element.LookupParameter("Pööra Kaamerat") is Parameter userRotationParameter)
+                        // 1. Try "Pööra Kaamerat" (Instance)
+                        Parameter p1 = element.LookupParameter("Pööra Kaamerat");
+                        if (p1 != null)
                         {
-                            double rotationRadians = userRotationParameter.AsDouble();
-                            userRotation = rotationRadians * (180.0 / Math.PI); // Convert to degrees
+                            double val = p1.AsDouble();
+                            userRotation = val * (180.0 / Math.PI);
                             foundParam = true;
                         }
-                        else
-                        {
-                            // Fallback to old parameter: "Kaamera nurk"
-                            // Check Instance first
-                            Parameter rotationParam = element.LookupParameter("Kaamera nurk");
-                            
-                            // If not on Instance, check Type
-                            if (rotationParam == null)
-                            {
-                                ElementId typeId = element.GetTypeId();
-                                if (typeId != null && typeId != ElementId.InvalidElementId)
-                                {
-                                    if (_doc.GetElement(typeId) is ElementType elementType)
-                                    {
-                                        rotationParam = elementType.LookupParameter("Kaamera nurk");
-                                    }
-                                }
-                            }
-                            
-                            if (rotationParam != null)
-                            {
-                                double rotationRadians = rotationParam.AsDouble();
-                                userRotation = rotationRadians * (180.0 / Math.PI);
-                                foundParam = true;
-                            }
-                        }
-
-
 
                         // Determine if we need the conditional 180 offset based on initial value
                         // FIX: Only apply if value is strictly positive (checking against small epsilon)
@@ -654,12 +628,50 @@ namespace Camera_FOV
                         // Display only the user rotation in UI (base rotation is applied silently)
                         RotationAngleTextBox.Text = userRotation.ToString("F0", CultureInfo.InvariantCulture);
 
-                        // Read "Vaatenurk" parameter (Field of View)
-                        if (element.LookupParameter("Vaatenurk") is Parameter fovAngleParameter)
+                        // Read "Vaatenurk" or "Kaamera nurk" parameter (Field of View)
+                        // Priority: Vaatenurk (Inst) -> Kaamera nurk (Inst) -> Kaamera nurk (Type)
+                        double finalFovDegrees = 0;
+                        bool fovFound = false;
+
+                        // 1. Vaatenurk (Instance)
+                        if (element.LookupParameter("Vaatenurk") is Parameter fovParam)
                         {
-                            double fovAngle = fovAngleParameter.AsDouble(); // Get value
-                            double fovAngleDegrees = fovAngle * (180.0 / Math.PI); // Convert to degrees
-                            FOVAngleTextBox.Text = fovAngleDegrees.ToString("F0", CultureInfo.InvariantCulture);
+                             finalFovDegrees = fovParam.AsDouble() * (180.0 / Math.PI);
+                             fovFound = true;
+                        }
+                        
+                        // 2. Kaamera nurk (Instance)
+                        if (!fovFound)
+                        {
+                             Parameter knInst = element.LookupParameter("Kaamera nurk");
+                             if (knInst != null)
+                             {
+                                 finalFovDegrees = knInst.AsDouble() * (180.0 / Math.PI);
+                                 fovFound = true;
+                             }
+                        }
+
+                        // 3. Kaamera nurk (Type)
+                        if (!fovFound)
+                        {
+                            ElementId typeId = element.GetTypeId();
+                            if (typeId != null && typeId != ElementId.InvalidElementId)
+                            {
+                                if (_doc.GetElement(typeId) is ElementType elementType)
+                                {
+                                    Parameter knType = elementType.LookupParameter("Kaamera nurk");
+                                    if (knType != null)
+                                    {
+                                        finalFovDegrees = knType.AsDouble() * (180.0 / Math.PI);
+                                        fovFound = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (fovFound)
+                        {
+                            FOVAngleTextBox.Text = finalFovDegrees.ToString("F0", CultureInfo.InvariantCulture);
                         }
 
                         // Read "Horisontaalne Resolutsioon" parameter (Resolution)
