@@ -70,6 +70,13 @@ The FOV generation uses an intelligent algorithm to simulate the camera's line o
 The maximum effective range is dynamically calculated based on the **DORI standard** (Pixels Per Meter), ensuring the visualization meets specific security requirements (Detection, Observation, Recognition, Identification). 
 The formula derives the maximum distance from the camera's **Resolution** and **Field of View**, adhering to the mathematical relationship between pixel density and arc length.
 
+## Changelog
+
+### Latest
+- **Fix**: FOV filled region arc (curved far end) was being drawn as a straight line. The boundary now correctly renders as a proper arc when the camera has unobstructed line of sight.
+- **Fix**: "Could not generate a valid filled region boundary" error occurring when Boundary detail lines include full-circle (unbound) curves. These are now handled gracefully.
+- **Improvement**: Boundary intersection engine rewritten for better performance — rays are cast using pure 2D math instead of Revit API geometry operations, significantly reducing draw time for complex scenes.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

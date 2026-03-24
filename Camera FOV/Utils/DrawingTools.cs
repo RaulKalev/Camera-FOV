@@ -609,24 +609,39 @@ namespace Camera_FOV.Utils
                         {
                             try
                             {
-                                // Create arc on XY plane centered at camera position
-                                Plane arcPlane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, _currentPosition);
-                                
-                                // Calculate the arc radius (all points should be equidistant from center)
-                                double radius = startNode.Point.DistanceTo(_currentPosition);
-                                
-                                // Calculate start and end angles relative to camera position
-                                XYZ startVec = (startNode.Point - _currentPosition).Normalize();
-                                XYZ endVec = (endNode.Point - _currentPosition).Normalize();
-                                
-                                double startAngle = Math.Atan2(startVec.Y, startVec.X);
-                                double endAngle = Math.Atan2(endVec.Y, endVec.X);
-                                
-                                // Ensure we go counter-clockwise (positive angle direction)
-                                if (endAngle < startAngle)
-                                    endAngle += 2 * Math.PI;
-                                
-                                Curve arc = Arc.Create(arcPlane, radius, startAngle, endAngle);
+                                Curve arc = null;
+
+                                // Prefer 3-point arc: uses actual XYZ points (correct Z after projection)
+                                // and avoids relying on the plane's implicit X-axis direction.
+                                int midIdx = i + (j - 1 - i) / 2;
+                                if (midIdx > i && midIdx < j - 1
+                                    && points[midIdx].Point.DistanceTo(startNode.Point) > tolerance
+                                    && points[midIdx].Point.DistanceTo(endNode.Point) > tolerance)
+                                {
+                                    try
+                                    {
+                                        arc = Arc.Create(startNode.Point, endNode.Point, points[midIdx].Point);
+                                    }
+                                    catch { arc = null; }
+                                }
+
+                                // Fallback: plane-based arc with Z aligned to the projected points
+                                if (arc == null)
+                                {
+                                    double arcZ = startNode.Point.Z;
+                                    XYZ arcOrigin = new XYZ(_currentPosition.X, _currentPosition.Y, arcZ);
+                                    Plane arcPlane = Plane.CreateByOriginAndBasis(arcOrigin, XYZ.BasisX, XYZ.BasisY);
+                                    double radius = Math.Sqrt(
+                                        Math.Pow(startNode.Point.X - _currentPosition.X, 2) +
+                                        Math.Pow(startNode.Point.Y - _currentPosition.Y, 2));
+                                    XYZ startVec = new XYZ(startNode.Point.X - _currentPosition.X, startNode.Point.Y - _currentPosition.Y, 0).Normalize();
+                                    XYZ endVec   = new XYZ(endNode.Point.X   - _currentPosition.X, endNode.Point.Y   - _currentPosition.Y, 0).Normalize();
+                                    double startAngle = Math.Atan2(startVec.Y, startVec.X);
+                                    double endAngle   = Math.Atan2(endVec.Y,   endVec.X);
+                                    if (endAngle < startAngle) endAngle += 2 * Math.PI;
+                                    arc = Arc.Create(arcPlane, radius, startAngle, endAngle);
+                                }
+
                                 loop.Append(arc);
                                 i = j - 1;
                                 merged = true;
@@ -739,90 +754,246 @@ namespace Camera_FOV.Utils
             return loop;
         }
 
-        private List<FOVPoint> CalculateFOVPointsForCircle(double resolution)
+        // Optimized lightweight structure for 2D lines
+        private struct SimpleLine
         {
-            List<FOVPoint> circlePoints = new List<FOVPoint>();
-            List<Curve> boundaryLines = GetBoundaryDetailLines(); 
+            public double X1, Y1, X2, Y2;
+            public Curve OriginalCurve;
 
-            double radius = _maxDistance / 0.3048; 
-            XYZ center = _currentPosition;
-
-            for (double angle = 0; angle < 360; angle += resolution)
+            public SimpleLine(double x1, double y1, double x2, double y2, Curve original)
             {
-                double angleRadians = angle * Math.PI / 180.0;
-                XYZ direction = new XYZ(Math.Cos(angleRadians), Math.Sin(angleRadians), 0).Normalize();
-                XYZ endPoint = center + direction.Multiply(radius);
+                X1 = x1; Y1 = y1; X2 = x2; Y2 = y2;
+                OriginalCurve = original;
+            }
+        }
 
-                Line ray = Line.CreateBound(center, endPoint);
-                var hit = FindClosestIntersection(ray, boundaryLines);
+        private List<SimpleLine> GetOptimizedBoundaryLines(double maxRadius)
+        {
+            var rawCurves = GetBoundaryDetailLines();
+            var optimizedLines = new List<SimpleLine>();
+            
+            // Plane for projection (Z = current position Z)
+            Plane plane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, _currentPosition);
+            
+            // Bounding box for distance filtering (simple square check is faster than radius)
+            double minX = _currentPosition.X - maxRadius;
+            double maxX = _currentPosition.X + maxRadius;
+            double minY = _currentPosition.Y - maxRadius;
+            double maxY = _currentPosition.Y + maxRadius;
 
-                if (hit != null)
+            foreach (var curve in rawCurves)
+            {
+                // Unbound curves (full-circle arcs, ellipses) have no endpoints — tessellate directly.
+                if (!curve.IsBound)
                 {
-                     circlePoints.Add(new FOVPoint(hit.Item1, false, hit.Item2));
+                    try
+                    {
+                        IList<XYZ> pts = curve.Tessellate();
+                        for (int i = 0; i < pts.Count - 1; i++)
+                        {
+                            double tx1 = pts[i].X, ty1 = pts[i].Y;
+                            double tx2 = pts[i + 1].X, ty2 = pts[i + 1].Y;
+                            if ((tx1 < minX && tx2 < minX) || (tx1 > maxX && tx2 > maxX) ||
+                                (ty1 < minY && ty2 < minY) || (ty1 > maxY && ty2 > maxY))
+                                continue;
+                            optimizedLines.Add(new SimpleLine(tx1, ty1, tx2, ty2, curve));
+                        }
+                    }
+                    catch { /* skip unprocessable curves */ }
+                    continue;
+                }
+
+                // 1. Project to 2D
+                // We manually project endpoints for speed, assuming planar movement on Z
+                // If curves are not flat, this approximation is still valid for "Plan View" tracing
+                
+                XYZ start = curve.GetEndPoint(0);
+                XYZ end = curve.GetEndPoint(1);
+
+                // Simple Z-drop projection (much faster than API Plane projection)
+                double x1 = start.X;
+                double y1 = start.Y;
+                double x2 = end.X;
+                double y2 = end.Y;
+
+                // 2. Distance Filter (AABB check)
+                // If both points are outside the box in the same direction, skip
+                if ((x1 < minX && x2 < minX) || (x1 > maxX && x2 > maxX) ||
+                    (y1 < minY && y2 < minY) || (y1 > maxY && y2 > maxY))
+                {
+                    continue;
+                }
+                
+                // 3. Tessellate Arcs
+                if (curve is Arc arc)
+                {
+                    // Tessellate arcs into small segments for linear intersection
+                    // This is faster than solving Line-Arc intersection mathematically in 2D for multiple rays
+                    IList<XYZ> points = arc.Tessellate();
+                    for (int i = 0; i < points.Count - 1; i++)
+                    {
+                        optimizedLines.Add(new SimpleLine(points[i].X, points[i].Y, points[i+1].X, points[i+1].Y, curve));
+                    }
                 }
                 else
                 {
-                     circlePoints.Add(new FOVPoint(endPoint, true));
+                     optimizedLines.Add(new SimpleLine(x1, y1, x2, y2, curve));
+                }
+            }
+
+            return optimizedLines;
+        }
+
+        // Pure Math Intersection (No Revit API)
+        // Returns Distance to intersection, or double.MaxValue if none
+        private double GetIntersectionDistance(double rX1, double rY1, double rX2, double rY2, SimpleLine wall, out double intX, out double intY)
+        {
+            intX = 0; intY = 0;
+            
+            // Ray: P + t * D, but we have segment (rX1,rY1) to (rX2,rY2)
+            // Wall: (X1,Y1) to (X2,Y2)
+            
+            double x1 = wall.X1, y1 = wall.Y1, x2 = wall.X2, y2 = wall.Y2;
+            double x3 = rX1, y3 = rY1, x4 = rX2, y4 = rY2;
+
+            double den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+            
+            // Parallel?
+            if (Math.Abs(den) < 1e-9) return double.MaxValue;
+
+            double t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+            double u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / den;
+
+            // t is for wall segment (must be 0..1)
+            // u is for ray segment (must be 0..1)
+            
+            if (t >= 0 && t <= 1 && u >= 0 && u <= 1)
+            {
+                intX = x1 + t * (x2 - x1);
+                intY = y1 + t * (y2 - y1);
+                
+                // Return distance squared for comparison speed? No, need actual distance for sorting if multiple hits?
+                // Actually u is the fraction of ray length. ray length is MaxDistance.
+                // So distance = u * MaxDistance
+                return u; 
+            }
+
+            return double.MaxValue;
+        }
+
+        private List<FOVPoint> CalculateFOVPointsForCircle(double resolution)
+        {
+            List<FOVPoint> circlePoints = new List<FOVPoint>();
+            double maxDistFeet = _maxDistance / 0.3048;
+
+            // PRE-PROCESS: Get optimized lines once
+            var boundaryLines = GetOptimizedBoundaryLines(maxDistFeet);
+
+            double cx = _currentPosition.X;
+            double cy = _currentPosition.Y;
+            double planeZ = _currentPosition.Z; // Or active view plane Z
+
+            for (double angle = 0; angle < 360; angle += resolution)
+            {
+                double rad = angle * Math.PI / 180.0;
+                double dirX = Math.Cos(rad);
+                double dirY = Math.Sin(rad);
+                
+                double endX = cx + dirX * maxDistFeet;
+                double endY = cy + dirY * maxDistFeet;
+
+                // Find closest hit
+                double minU = double.MaxValue;
+                Curve hitCurve = null;
+                double hitX = endX, hitY = endY;
+
+                foreach (var line in boundaryLines)
+                {
+                    double ix, iy;
+                    double u = GetIntersectionDistance(cx, cy, endX, endY, line, out ix, out iy);
+                    if (u < minU)
+                    {
+                        minU = u;
+                        hitX = ix;
+                        hitY = iy;
+                        hitCurve = line.OriginalCurve;
+                    }
+                }
+
+                if (minU < 1.0) // Hit something
+                {
+                     circlePoints.Add(new FOVPoint(new XYZ(hitX, hitY, planeZ), false, hitCurve));
+                }
+                else // Max distance
+                {
+                     circlePoints.Add(new FOVPoint(new XYZ(endX, endY, planeZ), true));
                 }
             }
             
-            // Ensure first point is distinct for logic, loop closure handled in Simplify
             return circlePoints;
         }
 
         private List<FOVPoint> CalculateFOVPointsWithIntersection(double resolution)
         {
-             // Add Origin? For filled region, we usually start at origin for "Pie" shape?
-             // But existing logic was a perimeter?
-             // Yes, { _currentPosition } was added.
-             
              List<FOVPoint> fovPoints = new List<FOVPoint>();
-             // Always include origin for the cone shape
              fovPoints.Add(new FOVPoint(_currentPosition, false, null)); 
-
-            List<Curve> boundaryLines = GetBoundaryDetailLines();
 
             if (_fovAngle == 360.0)
             {
-                 // Reuse
                  return CalculateFOVPointsForCircle(resolution);
             }
             else
             {
+                double maxDistFeet = _maxDistance / 0.3048;
+                
+                // PRE-PROCESS: Get optimized lines once
+                var boundaryLines = GetOptimizedBoundaryLines(maxDistFeet);
+
+                double cx = _currentPosition.X;
+                double cy = _currentPosition.Y;
+                double planeZ = _currentPosition.Z;
+
                 double halfFOV = _fovAngle / 2.0;
                 double startAngle = _rotationAngle - halfFOV;
                 double endAngle = _rotationAngle + halfFOV;
 
                 for (double angle = startAngle; angle <= endAngle; angle += resolution)
                 {
-                    double angleRadians = angle * Math.PI / 180.0;
-                    XYZ direction = new XYZ(Math.Cos(angleRadians), Math.Sin(angleRadians), 0).Normalize();
-                    XYZ endPoint = _currentPosition + direction.Multiply(_maxDistance / 0.3048);
-
-                    Line ray = Line.CreateBound(_currentPosition, endPoint);
-                    var hit = FindClosestIntersection(ray, boundaryLines);
+                    double rad = angle * Math.PI / 180.0;
+                    double dirX = Math.Cos(rad);
+                    double dirY = Math.Sin(rad);
                     
-                    if (hit != null)
-                        fovPoints.Add(new FOVPoint(hit.Item1, false, hit.Item2));
+                    double endX = cx + dirX * maxDistFeet;
+                    double endY = cy + dirY * maxDistFeet;
+                    
+                    // Find closest hit optimized
+                    double minU = double.MaxValue;
+                    Curve hitCurve = null;
+                    double hitX = endX, hitY = endY;
+
+                    foreach (var line in boundaryLines)
+                    {
+                        double ix, iy;
+                        double u = GetIntersectionDistance(cx, cy, endX, endY, line, out ix, out iy);
+                        if (u < minU)
+                        {
+                            minU = u;
+                            hitX = ix;
+                            hitY = iy;
+                            hitCurve = line.OriginalCurve;
+                        }
+                    }
+
+                     if (minU < 1.0)
+                        fovPoints.Add(new FOVPoint(new XYZ(hitX, hitY, planeZ), false, hitCurve));
                     else
-                        fovPoints.Add(new FOVPoint(endPoint, true));
+                        fovPoints.Add(new FOVPoint(new XYZ(endX, endY, planeZ), true));
                 }
             }
             
-            // Close back to origin for Cone?
-            // Existing logic: "fovPoints.Add(fovPoints[1])" ? No, existing logic added origin first, then points.
-            // Then "boundary.Add(..)" connected them sequentially.
-            // If we want a solid pie, we start at origin, go to first point on rim, go around rim, go back to origin.
-            
-            // My SimplifyBoundary expects a contiguous chain of points forming the loop.
-            // fovPoints currently: [Origin, RimPoint1, RimPoint2, ..., RimPointN]
-            // We need to close it: [..., RimPointN, Origin]?
-            // The existing list starts with Origin. SimplifyBoundary will add Origin at end if not present.
-            // So: Origin -> Point1 -> PointN -> Origin. Perfect.
-            
             return fovPoints;
         }
-
+    
         public void DeleteFilledRegion()
         {
             if (_currentFilledRegion != null)
@@ -852,56 +1023,48 @@ namespace Camera_FOV.Utils
 
         private List<Curve> GetBoundaryDetailLines()
         {
-            List<Curve> boundaryLines = new FilteredElementCollector(_doc, _currentView.Id)
+            var elements = new FilteredElementCollector(_doc, _currentView.Id)
                 .OfClass(typeof(CurveElement))
                 .WhereElementIsNotElementType()
                 .Cast<CurveElement>()
-                .Where(el => el.LineStyle.Name == "Boundary") 
-                .Select(el => el.GeometryCurve)
-                .ToList();
+                .Where(el => el.LineStyle.Name == "Boundary");
+
+            ElementId activeLevelId = _currentView.GenLevel?.Id;
+            List<Curve> boundaryLines = new List<Curve>();
+
+            foreach (var el in elements)
+            {
+                if (el is ModelCurve)
+                {
+                    // For Model Lines: specific logic to restrict to active floor
+                    if (activeLevelId != null)
+                    {
+                        if (el.LevelId == activeLevelId)
+                        {
+                            boundaryLines.Add(el.GeometryCurve);
+                        }
+                    }
+                    else
+                    {
+                        // Not a plan view (no GenLevel), so we can't filter by floor. Accept all visible.
+                        boundaryLines.Add(el.GeometryCurve);
+                    }
+                }
+                else
+                {
+                    // Detail Lines are view-specific, so strictly belong to this view.
+                    boundaryLines.Add(el.GeometryCurve);
+                }
+            }
 
             return boundaryLines;
         }
 
-        // Return Tuple<Point, HitCurve>
+        // Old methods removed/replaced for optimization
         private Tuple<XYZ, Curve> FindClosestIntersection(Line ray, List<Curve> boundaryLines)
         {
-            Plane workingPlane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, new XYZ(0, 0, _currentPosition.Z));
-            Line projectedRay = ProjectCurveToPlane(ray, workingPlane) as Line;
-
-            if (projectedRay == null) return null;
-
-            XYZ closestPoint = null;
-            Curve hitCurve = null;
-            double minDistance = double.MaxValue;
-
-            foreach (Curve boundary in boundaryLines)
-            {
-                Curve projectedBoundary = ProjectCurveToPlane(boundary, workingPlane);
-
-                if (projectedBoundary == null) continue;
-
-                IntersectionResultArray resultArray;
-#pragma warning disable CS0618 // Type or member is obsolete
-                SetComparisonResult result = projectedRay.Intersect(projectedBoundary, out resultArray);
-#pragma warning restore CS0618 // Type or member is obsolete
-
-                if (result == SetComparisonResult.Overlap && resultArray != null && resultArray.Size > 0)
-                {
-                    foreach (IntersectionResult resultPoint in resultArray)
-                    {
-                        double distance = projectedRay.GetEndPoint(0).DistanceTo(resultPoint.XYZPoint);
-                        if (distance < minDistance)
-                        {
-                            minDistance = distance;
-                            closestPoint = resultPoint.XYZPoint;
-                            hitCurve = boundary; // Capture the original 3D curve (or projected? Original is better for identity)
-                        }
-                    }
-                }
-            }
-
-            return closestPoint != null ? Tuple.Create(closestPoint, hitCurve) : null;
+             // Deprecated by optimized inline logic
+             return null;
         }
 
         private Curve ProjectCurveToPlane(Curve curve, Plane plane)
