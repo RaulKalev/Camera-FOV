@@ -309,6 +309,7 @@ namespace Camera_FOV.UI
                 ModelBox.Text = type.Model;
                 ResolutionHBox.Text = type.HorizontalResolution > 0 ? type.HorizontalResolution.ToString(CultureInfo.InvariantCulture) : string.Empty;
                 ResolutionVBox.Text = Format(type.VerticalResolution);
+                FrameRateBox.Text = Format(type.FrameRate);
                 SensorWidthBox.Text = Format(type.SensorWidthMm);
                 SensorHeightBox.Text = Format(type.SensorHeightMm);
                 SensorFormatCombo.SelectedItem = SensorFormat.Standard.Any(f => f.Name == type.SensorFormat) ? type.SensorFormat : CustomSensor;
@@ -398,6 +399,7 @@ namespace Camera_FOV.UI
             double? resolutionV = Number(ResolutionVBox, "Vertical resolution");
             type.HorizontalResolution = resolutionH.HasValue ? (int)Math.Round(resolutionH.Value) : 0;
             type.VerticalResolution = resolutionV.HasValue ? (int?)Math.Round(resolutionV.Value) : null;
+            type.FrameRate = Number(FrameRateBox, "Frame rate");
 
             string format = SensorFormatCombo.SelectedItem as string;
             type.SensorFormat = format == CustomSensor ? null : format;

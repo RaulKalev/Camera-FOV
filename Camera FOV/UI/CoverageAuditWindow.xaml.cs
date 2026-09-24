@@ -856,14 +856,19 @@ namespace Camera_FOV.UI
                 return;
             }
 
-            var lines = sees.Select(s =>
+            var lines = sees.Select((s, i) =>
             {
                 ObservationCategory category = CameraData.CategoryFor(s.Density);
+                // Frames while crossing (issue #18): for the best camera always, for the others when their frame rate is known
+                string crossing = i == 0 || s.Sight.Camera.FrameRate.HasValue
+                    ? FrameRates.Describe(CameraData.SceneWidthMeters(s.Sight.Camera.FovDegrees.Value, s.Sight.SlantMeters(s.Meters), _sightFormula), s.Sight.Camera.FrameRate)
+                    : string.Empty;
                 return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Sight.SlantMeters(s.Meters):0.0} m."
                     + PointCoverage.MountNote(s.Sight.Camera.Mount, s.Meters, category != null && category.Index >= 5)
                     + (s.Sight.Camera.IntendedCategory is ObservationCategory intended
                         ? (s.Density >= intended.PixelsPerMeter ? $" Meets its intended {intended.Name} here." : $" Below its intended {intended.Name} here.")
-                        : string.Empty);
+                        : string.Empty)
+                    + crossing;
             });
 
             string heading = sees.Count == 1 ? "1 camera sees this spot" : $"{sees.Count} cameras see this spot";

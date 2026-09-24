@@ -141,6 +141,7 @@ namespace Camera_FOV.Services
             result.Verdict = PointVerdict.Covered;
             result.Reason = $"{result.Level.Name}: {result.PixelsPerMeter:0} px/m at {at} ({resolution} px, {fov:0}°).";
             result.Reason += MountNote(mount, result.DistanceMeters, result.Level.Index == CameraData.Levels.Count - 1);
+            result.Reason += FrameRates.Describe(CameraData.SceneWidthMeters(fov, result.SlantMeters, CameraData.CurrentFormula), FrameRates.Read(camera));
             return result;
         }
 

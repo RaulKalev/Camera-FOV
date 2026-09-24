@@ -29,6 +29,7 @@ namespace Camera_FOV.Services
         public CameraMount Mount;  // Height and tilt (issue #16)
         public ObservationCategory IntendedCategory; // What it is for (issue #14)
         public string RiskGrade;
+        public double? FrameRate; // Frames per second (issue #18)
         public CoverageState State;
     }
 
@@ -186,6 +187,7 @@ namespace Camera_FOV.Services
             var (category, grade) = CameraPurpose.Read(camera);
             auditCamera.IntendedCategory = category;
             auditCamera.RiskGrade = grade;
+            auditCamera.FrameRate = FrameRates.Read(camera);
         }
 
         // Rooms and MEP spaces whose height range contains the plan's cut plane, with their boundaries

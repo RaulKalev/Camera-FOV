@@ -380,6 +380,25 @@
                                             Style="{StaticResource Type.Unit}"
                                             Text="px" />
                                     </Grid>
+                                    <Border Style="{StaticResource RowSeparator}" />
+                                    <Grid Style="{StaticResource CardRow}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="28" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Style="{StaticResource Type.Body}" Text="Frame rate" />
+                                        <TextBox
+                                            x:Name="FrameRateBox"
+                                            Grid.Column="1"
+                                            AutomationProperties.Name="Frame rate in frames per second"
+                                            Style="{StaticResource RangeValue}"
+                                            ToolTip="Frames per second it records at; used to count the frames a moving person or vehicle gets" />
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            Style="{StaticResource Type.Unit}"
+                                            Text="fps" />
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 

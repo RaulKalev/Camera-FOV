@@ -50,6 +50,7 @@ namespace Camera_FOV.Models
 
         public int HorizontalResolution { get; set; }
         public int? VerticalResolution { get; set; }
+        public double? FrameRate { get; set; } // Frames per second it records at (issue #18)
 
         public string SensorFormat { get; set; } // A SensorFormat name, or null for a custom size
         public double? SensorWidthMm { get; set; }
@@ -165,6 +166,8 @@ namespace Camera_FOV.Models
             CheckRange(problems, "Vertical field of view", VerticalFovMin, VerticalFovMax, 180, required: false);
             CheckRange(problems, "Focal length", FocalLengthMinMm, FocalLengthMaxMm, 1000, required: false);
 
+            if (FrameRate.HasValue && (FrameRate.Value <= 0 || FrameRate.Value > 1000))
+                problems.Add(("Frame rate", "Enter the frames per second above 0, for example 25, or leave it empty."));
             if (SensorWidthMm.HasValue && SensorWidthMm.Value <= 0)
                 problems.Add(("Sensor width", "Enter the width in millimetres above 0, or leave it empty."));
             if (SensorHeightMm.HasValue && SensorHeightMm.Value <= 0)

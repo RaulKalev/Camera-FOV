@@ -97,6 +97,12 @@ namespace Camera_FOV.Services
             return 2 * Math.PI * fovDegrees / 360.0;
         }
 
+        /// <summary>Width of the scene in metres at a distance: what a crossing object has to travel (issue #18).</summary>
+        public static double SceneWidthMeters(double fovDegrees, double distanceMeters, PixelDensityFormula formula)
+        {
+            return WidthPerMeter(fovDegrees, formula) * distanceMeters;
+        }
+
         /// <summary>Horizontal pixels per metre at a distance, with the formula chosen in Settings.</summary>
         public static double PixelsPerMeter(int resolution, double fovDegrees, double distanceMeters)
         {
