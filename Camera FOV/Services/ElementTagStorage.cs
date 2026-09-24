@@ -82,6 +82,58 @@ namespace Camera_FOV.Services
             return result;
         }
 
+        // Stored in the region type field of the coverage schema to mark a camera's field-of-view
+        // dimension, so no new schema is needed.
+        private const string FovDimensionMarker = "CameraFovDimension";
+
+        /// <summary>
+        /// Tags a generated field-of-view dimension with its camera and owning view.
+        /// Must be called inside an open transaction.
+        /// </summary>
+        public static void TagFovDimension(Dimension dimension, Element camera, View view)
+        {
+            if (dimension == null || camera == null || view == null) return;
+
+            Entity entity = new Entity(GetCoverageSchema());
+            entity.Set(FieldOwnerUniqueId, dimension.UniqueId);
+            entity.Set(FieldViewUniqueId, view.UniqueId);
+            entity.Set(FieldCameraUniqueId, camera.UniqueId);
+            entity.Set(FieldRegionTypeUniqueId, FovDimensionMarker);
+            dimension.SetEntity(entity);
+        }
+
+        /// <summary>
+        /// Finds field-of-view dimensions previously generated for this camera in this view.
+        /// Dimensions placed by hand and copies are never returned.
+        /// </summary>
+        public static List<ElementId> FindFovDimensions(Document doc, View view, Element camera)
+        {
+            var result = new List<ElementId>();
+            if (doc == null || view == null || camera == null) return result;
+
+            Schema schema = Schema.Lookup(CoverageSchemaGuid);
+            if (schema == null) return result;
+
+            var dimensions = new FilteredElementCollector(doc, view.Id)
+                .OfClass(typeof(Dimension))
+                .WhereElementIsNotElementType();
+
+            foreach (Element dimension in dimensions)
+            {
+                Entity entity = dimension.GetEntity(schema);
+                if (!IsOwnedBy(entity, dimension)) continue;
+
+                if (entity.Get<string>(FieldViewUniqueId) == view.UniqueId
+                    && entity.Get<string>(FieldCameraUniqueId) == camera.UniqueId
+                    && entity.Get<string>(FieldRegionTypeUniqueId) == FovDimensionMarker)
+                {
+                    result.Add(dimension.Id);
+                }
+            }
+
+            return result;
+        }
+
         #endregion
 
         #region Traced boundary lines

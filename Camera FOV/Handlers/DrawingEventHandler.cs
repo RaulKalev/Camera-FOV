@@ -1381,10 +1381,14 @@ namespace Camera_FOV.Handlers
         // Untagged regions from older versions are never deleted.
         List<ElementId> previousCoverage = layers
             .SelectMany(l => ElementTagStorage.FindCoverageRegions(doc, view, _cameraElement, l.TypeId))
+            .Concat(ElementTagStorage.FindFovDimensions(doc, view, _cameraElement))
             .Distinct()
             .ToList();
 
         var created = new List<ElementId>();
+        DoriLayerConfig smallestLayer = layers.OrderBy(l => l.Distance).First(); // Carries the dimension
+        ElementId smallestRegionId = null;
+        string dimensionFailure = null;
 
         using (TransactionGroup group = new TransactionGroup(doc, "Draw Camera Coverage"))
         {
@@ -1397,7 +1401,8 @@ namespace Camera_FOV.Handlers
 
                 foreach (DoriLayerConfig layer in layers)
                 {
-                    ElementId id = DrawLayer(layer.Distance, layer.TypeId, layer.DrawDimension);
+                    bool carriesDimension = layer == smallestLayer && IsFovDimensionEnabled && _fovAngle < 180;
+                    ElementId id = DrawLayer(layer.Distance, layer.TypeId, carriesDimension ? FovDimensionLegLengthMm / 304.8 : 0);
                     if (id == ElementId.InvalidElementId)
                     {
                         group.RollBack();
@@ -1409,6 +1414,8 @@ namespace Camera_FOV.Handlers
                         return;
                     }
                     created.Add(id);
+                    if (layer == smallestLayer)
+                        smallestRegionId = id;
                 }
 
                 if (previousCoverage.Any())
@@ -1416,11 +1423,21 @@ namespace Camera_FOV.Handlers
                     using (Transaction transaction = new Transaction(doc, "Remove Previous Coverage"))
                     {
                         transaction.Start();
-                        doc.Delete(previousCoverage.Where(id => doc.GetElement(id) != null).ToList());
+                        // One by one: deleting a region also deletes dimensions attached to it
+                        foreach (ElementId id in previousCoverage)
+                        {
+                            if (doc.GetElement(id) != null)
+                                doc.Delete(id);
+                        }
                         if (transaction.Commit() != TransactionStatus.Committed)
                             throw new InvalidOperationException("Removing the previous coverage could not be committed.");
                     }
                 }
+
+                // The dimension is a finishing touch: if it can't be placed, the coverage is still kept
+                ElementId dimensionId = PlaceFovDimension(doc, view, smallestRegionId, smallestLayer, out dimensionFailure);
+                if (dimensionId != null)
+                    created.Add(dimensionId);
 
                 if (group.Assimilate() != TransactionStatus.Committed)
                     throw new InvalidOperationException("The coverage could not be committed.");
@@ -1439,21 +1456,113 @@ namespace Camera_FOV.Handlers
         }
 
         _lastBatchCreatedIds = created;
+
+        if (dimensionFailure != null)
+        {
+            MessageDialog.Show(
+                MessageDialog.Kind.Info,
+                "Coverage drawn without the angle dimension",
+                "The coverage was drawn, but the field-of-view dimension couldn’t be placed on the innermost region. Add it by hand if you need it.",
+                details: dimensionFailure);
+        }
     }
 
-    // Removes the regions of the last successful draw in one step. The coverage they replaced is
-    // not restored here; Revit's own Undo does that.
+    private static bool IsFovDimensionEnabled => !string.IsNullOrWhiteSpace(SettingsManager.Settings.FovDimensionTypeName);
+
+    // Leg length split off each wedge side at the camera on the dimensioned region. The dimension
+    // attaches to these short pieces, so its witness lines run back to the camera instead of
+    // stopping where the long side is nearest the arc. 0.8 mm is just above Revit's shortest
+    // allowed line (about 0.78 mm); DrawingTools never goes below that limit.
+    private const double FovDimensionLegLengthMm = 0.8;
+
+    // Dimensions the field of view on the smallest (innermost) region, in its own transaction so a
+    // failure only skips the dimension. Type and arc distance come from the global settings.
+    // Returns the dimension id, or null with the reason.
+    private ElementId PlaceFovDimension(Document doc, View view, ElementId regionId, DoriLayerConfig layer, out string failure)
+    {
+        failure = null;
+        if (regionId == null || layer == null) return null;
+        if (!IsFovDimensionEnabled) return null;
+        if (_fovAngle >= 180) return null; // No wedge edges to dimension; nothing to report
+
+        string typeName = SettingsManager.Settings.FovDimensionTypeName;
+        double radius = SettingsManager.Settings.FovDimensionDistanceMeters / 0.3048;
+        if (radius <= 0) radius = 2.0 / 0.3048;
+
+        List<DimensionType> angularTypes = new FilteredElementCollector(doc)
+            .OfClass(typeof(DimensionType))
+            .Cast<DimensionType>()
+            .Where(t => t.StyleType == DimensionStyleType.Angular)
+            .ToList();
+
+        DimensionType dimensionType =
+            angularTypes.FirstOrDefault(t => t.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase))
+            ?? angularTypes.FirstOrDefault(t => t.Name.IndexOf("transparent", StringComparison.OrdinalIgnoreCase) < 0)
+            ?? angularTypes.FirstOrDefault();
+
+        if (dimensionType == null)
+        {
+            failure = "The project has no angular dimension type.";
+            return null;
+        }
+
+        using (Transaction transaction = new Transaction(doc, "Dimension Camera Angle"))
+        {
+            try
+            {
+                transaction.Start();
+
+                // Same parameters the region was drawn with, so the apex and wedge match it
+                _drawingTools.SetParameters(_position, layer.Distance, _rotationAngle, _fovAngle, layer.TypeId);
+                Dimension dimension = _drawingTools.CreateFovDimension(
+                    doc.GetElement(regionId) as FilledRegion,
+                    dimensionType,
+                    radius);
+
+                if (dimension == null)
+                {
+                    transaction.RollBack();
+                    failure = _drawingTools.LastFailure;
+                    return null;
+                }
+
+                ElementTagStorage.TagFovDimension(dimension, _cameraElement, view);
+
+                if (transaction.Commit() != TransactionStatus.Committed)
+                {
+                    failure = "The dimension could not be committed.";
+                    return null;
+                }
+
+                return dimension.Id;
+            }
+            catch (Exception ex)
+            {
+                if (transaction.HasStarted() && !transaction.HasEnded())
+                    transaction.RollBack();
+                failure = ex.Message;
+                return null;
+            }
+        }
+    }
+
+    // Removes the regions (and dimension) of the last successful draw in one step. The coverage they
+    // replaced is not restored here; Revit's own Undo does that.
     private void UndoLastCoverage()
     {
         Document doc = _drawingTools.Document;
-        List<ElementId> existing = _lastBatchCreatedIds.Where(id => doc.GetElement(id) != null).ToList();
 
-        if (existing.Any())
+        if (_lastBatchCreatedIds.Any(id => doc.GetElement(id) != null))
         {
             using (Transaction transaction = new Transaction(doc, "Undo Camera Coverage"))
             {
                 transaction.Start();
-                doc.Delete(existing);
+                // One by one: deleting a region also deletes the dimension attached to it
+                foreach (ElementId id in _lastBatchCreatedIds)
+                {
+                    if (doc.GetElement(id) != null)
+                        doc.Delete(id);
+                }
                 transaction.Commit();
             }
         }
@@ -1473,20 +1582,16 @@ namespace Camera_FOV.Handlers
     }
 
     // Creates one tagged region in its own transaction; the caller decides what to replace.
-    private ElementId DrawLayer(double distance, ElementId typeId, bool drawDimension)
+    // apexLegLength > 0 splits that length off each wedge side at the camera (see FovDimensionLegLengthMm).
+    private ElementId DrawLayer(double distance, ElementId typeId, double apexLegLength)
     {
         View view = _drawingTools.View;
 
         _drawingTools.SetParameters(_position, distance, _rotationAngle, _fovAngle, typeId);
-        ElementId newRegionId = _drawingTools.DrawFilledRegion( // Use slider resolution
+        return _drawingTools.DrawFilledRegion( // Use slider resolution
             _sliderResolution,
-            region => ElementTagStorage.TagCoverageRegion(region, _cameraElement, typeId, view));
-
-        if (newRegionId != ElementId.InvalidElementId && drawDimension)
-        {
-            _drawingTools.CreateAngularDimension(newRegionId);
-        }
-        return newRegionId;
+            region => ElementTagStorage.TagCoverageRegion(region, _cameraElement, typeId, view),
+            apexLegLength);
     }
 
     public string GetName()

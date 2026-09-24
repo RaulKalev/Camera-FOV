@@ -916,6 +916,18 @@ namespace Camera_FOV
         {
             return _sliderResolution;
         }
+
+        public List<string> GetAngularDimensionTypeNames()
+        {
+            return new FilteredElementCollector(_doc)
+                .OfClass(typeof(DimensionType))
+                .Cast<DimensionType>()
+                .Where(t => t.StyleType == DimensionStyleType.Angular)
+                .Select(t => t.Name)
+                .Distinct()
+                .OrderBy(n => n)
+                .ToList();
+        }
         private void DORIOption_Checked(object sender, RoutedEventArgs e)
         {
             if (sender is CheckBox currentCheckbox)

@@ -17,5 +17,10 @@ namespace Camera_FOV.Models
         public string ParameterName_FOVOverride { get; set; } = "Kaamera nurk";
         public string ParameterName_StandardFOV { get; set; } = "Vaatenurk";
         public string ParameterName_Resolution { get; set; } = "Horisontaalne Resolutsioon";
+
+        // Field-of-view dimension placed on the innermost coverage region. An empty type name
+        // turns the dimension off; a name missing from a project falls back to another angular type.
+        public string FovDimensionTypeName { get; set; } = "Kaamera nurk";
+        public double FovDimensionDistanceMeters { get; set; } = 2.0;
     }
 }

@@ -191,6 +191,52 @@
                         Style="{StaticResource Type.Caption}"
                         Text="Angle between the rays that trace the coverage outline. Applies to the next drawing." />
 
+                    <!--  ============ Angle dimension ============  -->
+                    <TextBlock Style="{StaticResource Type.Group}" Text="Angle dimension" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Dimension type" />
+                                <ComboBox
+                                    x:Name="DimensionTypeComboBox"
+                                    Grid.Column="1"
+                                    MinWidth="150"
+                                    MaxWidth="190"
+                                    AutomationProperties.Name="Angular dimension type"
+                                    Style="{StaticResource Input.Combo}"
+                                    ToolTip="Angular dimension type used for the field of view, or No dimension" />
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="18" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Distance from camera" />
+                                <TextBox
+                                    x:Name="DimensionDistanceTextBox"
+                                    Grid.Column="1"
+                                    MinWidth="72"
+                                    AutomationProperties.Name="Dimension distance from the camera in metres"
+                                    Style="{StaticResource Input.Value}"
+                                    ToolTip="Radius of the dimension arc, measured from the camera" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Style="{StaticResource Type.Unit}"
+                                    Text="m" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        Margin="12,6,12,0"
+                        Style="{StaticResource Type.Caption}"
+                        Text="Placed on the innermost DORI region when coverage is drawn. Applies to all projects." />
+
                     <!--  ============ Parameter mapping ============  -->
                     <TextBlock Style="{StaticResource Type.Group}" Text="Camera family parameters" />
                     <Border Padding="12,10,12,12" Style="{StaticResource Card}">

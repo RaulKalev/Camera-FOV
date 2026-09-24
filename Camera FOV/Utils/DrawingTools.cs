@@ -138,8 +138,10 @@ namespace Camera_FOV.Utils
         public string LastFailure { get; private set; }
 
         // onCreated runs inside the creating transaction, so anything it writes commits with the region.
+        // apexLegLength > 0 splits that length off each straight side leaving the camera, giving a
+        // dimension short edges to attach to at the camera.
         // On failure nothing is committed, InvalidElementId is returned and LastFailure says why.
-        public ElementId DrawFilledRegion(double resolution, Action<FilledRegion> onCreated = null)
+        public ElementId DrawFilledRegion(double resolution, Action<FilledRegion> onCreated = null, double apexLegLength = 0)
         {
             LastFailure = null;
 
@@ -222,7 +224,7 @@ namespace Camera_FOV.Utils
                         // Try A: Smart Simplify (Arc/Line reconstruction)
                         try
                         {
-                            CurveLoop boundary = SimplifyBoundary(fovPoints);
+                            CurveLoop boundary = SplitApexEdges(SimplifyBoundary(fovPoints), apexLegLength);
                             if (boundary.IsValidObject && !boundary.IsOpen() && boundary.Count() >= 3)
                             {
                                 region = FilledRegion.Create(_doc, _filledRegionTypeId, _currentView.Id, new List<CurveLoop> { boundary });
@@ -236,7 +238,7 @@ namespace Camera_FOV.Utils
                         {
                             try
                             {
-                                CurveLoop fallback = CreateFallbackBoundary(fovPoints);
+                                CurveLoop fallback = SplitApexEdges(CreateFallbackBoundary(fovPoints), apexLegLength);
                                 if (fallback.IsValidObject && !fallback.IsOpen() && fallback.Count() >= 3)
                                 {
                                     region = FilledRegion.Create(_doc, _filledRegionTypeId, _currentView.Id, new List<CurveLoop> { fallback });
@@ -340,234 +342,178 @@ namespace Camera_FOV.Utils
              return loop;
         }
 
-        public void CreateAngularDimension(ElementId filledRegionId)
+        // Places an angular dimension between the two straight edges of the region that meet at the
+        // camera (the field of view), with its arc at arcRadius from the camera. The references come
+        // from the region's own visible edges, the same ones a user picks when dimensioning by hand;
+        // the region's sketch lines are hidden once it is finished, and a dimension on them is too.
+        // Must run inside an open transaction. Returns null and sets LastFailure when not possible.
+        public Dimension CreateFovDimension(FilledRegion region, DimensionType dimensionType, double arcRadius)
         {
-            // FEATURE DISABLED: Angular dimensions created via API are not visible
-            // Despite extensive debugging, dimensions are created successfully but remain invisible
-            // This appears to be an API limitation or very specific requirement we haven't identified
-            // The dimension IS created (valid Element ID, correct value, persists after commit)
-            // but Revit does not display it visually
-            return;
-            
-            /* COMMENTED OUT - ORIGINAL IMPLEMENTATION
-            // Debug: CreateAngularDimension called
-            
-            if (filledRegionId == null || filledRegionId == ElementId.InvalidElementId) return;
+            LastFailure = null;
 
-            using (Transaction trans = new Transaction(_doc, "Create Angular Dimension"))
+            if (region == null || dimensionType == null || _currentPosition == null)
             {
-                trans.Start();
-                try
+                LastFailure = "The region, dimension type or camera position is missing.";
+                return null;
+            }
+
+            if (_fovAngle >= 180.0)
+            {
+                LastFailure = $"A {_fovAngle:0}° field of view has no wedge edges to dimension.";
+                return null;
+            }
+
+            var options = new Options { ComputeReferences = true, View = _currentView, IncludeNonVisibleObjects = true };
+            GeometryElement geometry = region.get_Geometry(options);
+            if (geometry == null)
+            {
+                LastFailure = "The region has no geometry in this view.";
+                return null;
+            }
+
+            // The apex is the region corner nearest the camera (a retry may shift it a few millimetres).
+            // Only edges ending exactly there count, so the short split legs are used, not the long
+            // sides that start just beyond them.
+            List<Tuple<Line, Reference>> lines = GetReferencedLines(geometry).ToList();
+            XYZ apexPoint = lines
+                .SelectMany(l => new[] { l.Item1.GetEndPoint(0), l.Item1.GetEndPoint(1) })
+                .OrderBy(p => DistanceXY(p, _currentPosition))
+                .FirstOrDefault();
+
+            if (apexPoint == null || DistanceXY(apexPoint, _currentPosition) > 50.0 / 304.8)
+            {
+                LastFailure = $"Found {lines.Count} referenceable region edges, none at the camera.";
+                return null;
+            }
+
+            double apexTolerance = 0.5 / 304.8;
+            var edges = new List<Tuple<XYZ, XYZ, Reference>>(); // apex, direction away from it, reference
+            foreach (Tuple<Line, Reference> edge in lines)
+            {
+                Line line = edge.Item1;
+                XYZ p0 = line.GetEndPoint(0), p1 = line.GetEndPoint(1);
+
+                if (DistanceXY(p0, apexPoint) < apexTolerance)
+                    edges.Add(Tuple.Create(p0, (p1 - p0).Normalize(), edge.Item2));
+                else if (DistanceXY(p1, apexPoint) < apexTolerance)
+                    edges.Add(Tuple.Create(p1, (p0 - p1).Normalize(), edge.Item2));
+            }
+
+            // The wedge sides are the pair of camera edges that open widest
+            Tuple<XYZ, XYZ, Reference> first = null, second = null;
+            double widest = 0;
+            for (int i = 0; i < edges.Count; i++)
+            for (int j = i + 1; j < edges.Count; j++)
+            {
+                double angle = edges[i].Item2.AngleTo(edges[j].Item2);
+                if (angle > widest && angle < Math.PI - 1e-6)
                 {
-                    // Ensure geometry is up to date
-                    _doc.Regenerate();
+                    widest = angle;
+                    first = edges[i];
+                    second = edges[j];
+                }
+            }
 
-                    FilledRegion region = _doc.GetElement(filledRegionId) as FilledRegion;
-                    if (region == null) 
+            if (first == null)
+            {
+                LastFailure = $"Found {edges.Count} referenceable region edges at the camera; two are needed.";
+                return null;
+            }
+
+            XYZ apex = first.Item1;
+            XYZ bisector = (first.Item2 + second.Item2).Normalize();
+
+            Arc arc = Arc.Create(
+                apex + first.Item2 * arcRadius,
+                apex + second.Item2 * arcRadius,
+                apex + bisector * arcRadius);
+
+            try
+            {
+                return AngularDimension.Create(_doc, _currentView, arc, new List<Reference> { first.Item3, second.Item3 }, dimensionType);
+            }
+            catch (Exception ex)
+            {
+                LastFailure = $"Revit rejected the angular dimension: {ex.Message}";
+                return null;
+            }
+        }
+
+        // Splits legLength off the start of each straight side that leaves the camera (the loop point
+        // nearest _currentPosition). The extra vertex is collinear, so the outline is unchanged.
+        private CurveLoop SplitApexEdges(CurveLoop loop, double legLength)
+        {
+            if (legLength <= 0 || loop == null || _currentPosition == null) return loop;
+
+            List<Curve> curves = loop.ToList();
+            XYZ apex = curves
+                .SelectMany(c => new[] { c.GetEndPoint(0), c.GetEndPoint(1) })
+                .OrderBy(p => DistanceXY(p, _currentPosition))
+                .FirstOrDefault();
+            if (apex == null) return loop;
+
+            double tolerance = _doc.Application.ShortCurveTolerance;
+            legLength = Math.Max(legLength, tolerance * 1.02); // Revit rejects lines shorter than this
+            var result = new CurveLoop();
+            foreach (Curve curve in curves)
+            {
+                XYZ start = curve.GetEndPoint(0), end = curve.GetEndPoint(1);
+                bool fromApex = start.DistanceTo(apex) < tolerance;
+                bool toApex = end.DistanceTo(apex) < tolerance;
+
+                if (curve is Line && (fromApex || toApex) && curve.Length > legLength * 2)
+                {
+                    // Keep the loop's direction: the leg sits on the apex end
+                    if (fromApex)
                     {
-                        // Region is NULL
-                        trans.RollBack();
-                        return;
-                    }
-
-                    // Get dependent CurveElements (the boundary lines)
-                    var dependentIds = region.GetDependentElements(null);
-                    List<CurveElement> convergingCurves = new List<CurveElement>();
-
-                    foreach (var id in dependentIds)
-                    {
-                        if (_doc.GetElement(id) is CurveElement ce && ce.GeometryCurve is Line line)
-                        {
-                            // Check if line connects to current camera position
-                            if (line.GetEndPoint(0).DistanceTo(_currentPosition) < 0.01 ||
-                                line.GetEndPoint(1).DistanceTo(_currentPosition) < 0.01)
-                            {
-                                convergingCurves.Add(ce);
-                            }
-                        }
-                    }
-
-                    if (convergingCurves.Count >= 2)
-                    {
-                        // Found converging curves
-                        CurveElement curve1 = convergingCurves[0];
-                        CurveElement curve2 = convergingCurves[1];
-                        Line line1 = curve1.GeometryCurve as Line;
-                        Line line2 = curve2.GeometryCurve as Line;
-
-                        // Create references from the lines
-                        Reference ref1 = line1.Reference;
-                        Reference ref2 = line2.Reference;
-                        
-                        // References created
-
-                        // Define Dimension Arc
-                        // Use a much larger radius so the arc extends well beyond the FOV region
-                        // Manual dimensions typically use larger arcs for better visibility
-                        double radius = UnitUtils.ConvertToInternalUnits(10000, UnitTypeId.Millimeters); // 10 meters instead of 2
-
-                        // Vectors from center
-                         XYZ vector1 = (line1.GetEndPoint(0).DistanceTo(_currentPosition) < 0.01 ? line1.Direction : -line1.Direction);
-                         XYZ vector2 = (line2.GetEndPoint(0).DistanceTo(_currentPosition) < 0.01 ? line2.Direction : -line2.Direction);
-
-                        // Create arc for dimension
-                        // We need an arc passing through the dimension line location.
-                        // Center = _currentPosition
-                        // Radius = radius
-                        
-                        // Plane for dimension
-                        // Assuming horizontal plane at Z
-                        XYZ normal = XYZ.BasisZ;
-                        XYZ xVec = vector1.Normalize();
-                        XYZ yVec = normal.CrossProduct(xVec).Normalize();
-                        
-                        // Angle to vector2
-                        double angle = xVec.AngleOnPlaneTo(vector2.Normalize(), normal); // 0 to 2PI
-                        
-                        // Create BOUNDED Arc using start and end points
-                        // Start point: along vector1 at radius distance
-                        XYZ startPoint = _currentPosition + (vector1.Normalize() * radius);
-                        // End point: along vector2 at radius distance  
-                        XYZ endPoint = _currentPosition + (vector2.Normalize() * radius);
-                        // Middle point: halfway between start and end on the arc
-                        double midAngle = angle / 2.0;
-                        XYZ midDirection = (Math.Cos(midAngle) * xVec + Math.Sin(midAngle) * yVec).Normalize();
-                        XYZ midPoint = _currentPosition + (midDirection * radius);
-                        
-                        Arc dimArc = Arc.Create(startPoint, endPoint, midPoint);
-
-                        // View
-                        View view = _doc.GetElement(_currentView.Id) as View;
-
-                        // 1. References
-                        var refs = new List<Reference> { ref1, ref2 };
-                        
-                        // 2. Dimension Type (Angular) - Exclude transparent types
-                        var allAngularTypes = new FilteredElementCollector(_doc)
-                            .OfClass(typeof(DimensionType))
-                            .Cast<DimensionType>()
-                            .Where(dt => dt.StyleType == DimensionStyleType.Angular)
-                            .ToList();
-                        
-                        // Found angular dimension types
-                        
-                        // Prefer non-transparent type
-                        DimensionType dimType = allAngularTypes
-                            .FirstOrDefault(dt => !dt.Name.ToLower().Contains("transparent"))
-                            ?? allAngularTypes.FirstOrDefault();
-
-                        if (dimType != null)
-                        {
-                            string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "AngularDimension_Debug.txt");
-                            StringBuilder log = new StringBuilder();
-                            log.AppendLine($"=== Angular Dimension Debug Log ===");
-                            log.AppendLine($"Dimension Type: {dimType.Name}");
-                            log.AppendLine($"View: {view.Name} (Type: {view.ViewType}, ID: {view.Id})");
-                            log.AppendLine($"Arc Center: {dimArc.Center}");
-                            log.AppendLine($"Arc Radius: {dimArc.Radius}");
-                            log.AppendLine($"Angle Span: {angle * 180 / Math.PI} degrees");
-                            log.AppendLine($"Reference 1 ElementId: {ref1.ElementId}");
-                            log.AppendLine($"Reference 2 ElementId: {ref2.ElementId}");
-                            
-                            // Try the older API: FamilyItemFactory.NewAngularDimension
-                            // This takes two separate references instead of a list
-                            Dimension dim = _doc.FamilyCreate.NewAngularDimension(view, dimArc, ref1, ref2, dimType);
-                            if (dim != null)
-                            {
-                                ElementId dimId = dim.Id;
-                                log.AppendLine($"\n=== Dimension Created ===");
-                                log.AppendLine($"Element ID: {dimId}");
-                                log.AppendLine($"Value: {dim.Value * 180 / Math.PI} degrees");
-                                log.AppendLine($"Curve: {dim.Curve?.GetType().Name ?? "null"}");
-                                log.AppendLine($"Number of References: {dim.References?.Size ?? 0}");
-                                
-                                // Workaround: Move dimension slightly to force visibility
-                                // This is a known workaround for invisible dimensions in Revit API
-                                try
-                                {
-                                    XYZ moveVector = new XYZ(0.01, 0.01, 0); // Small movement
-                                    ElementTransformUtils.MoveElement(_doc, dimId, moveVector);
-                                    log.AppendLine($"Applied move workaround");
-                                }
-                                catch (Exception moveEx)
-                                {
-                                    log.AppendLine($"Move workaround failed: {moveEx.Message}");
-                                }
-                                
-                                // Commit transaction
-                                trans.Commit();
-                                
-                                // Verify after commit
-                                Element verifyElement = _doc.GetElement(dimId);
-                                if (verifyElement != null && verifyElement is AngularDimension verifyDim)
-                                {
-                                    log.AppendLine($"\n=== Post-Commit Verification ===");
-                                    log.AppendLine($"Dimension PERSISTED: True");
-                                    log.AppendLine($"Still Valid: {verifyDim.IsValidObject}");
-                                    log.AppendLine($"Owner View ID: {verifyDim.OwnerViewId}");
-                                    log.AppendLine($"Curve after commit: {verifyDim.Curve?.GetType().Name ?? "null"}");
-                                    
-                                    // Check if curve is visible
-                                    if (verifyDim.Curve != null)
-                                    {
-                                        log.AppendLine($"Curve IsBound: {verifyDim.Curve.IsBound}");
-                                        if (verifyDim.Curve is Arc verifyArc)
-                                        {
-                                            log.AppendLine($"Arc Center: {verifyArc.Center}");
-                                            log.AppendLine($"Arc Radius: {verifyArc.Radius}");
-                                            log.AppendLine($"Arc Normal: {verifyArc.Normal}");
-                                        }
-                                    }
-                                    
-                                    // Check references
-                                    if (verifyDim.References != null)
-                                    {
-                                        log.AppendLine($"References count: {verifyDim.References.Size}");
-                                        foreach (Reference r in verifyDim.References)
-                                        {
-                                            log.AppendLine($"  - Ref ElementId: {r.ElementId}, LinkedElementId: {r.LinkedElementId}");
-                                        }
-                                    }
-                                    
-                                    File.WriteAllText(logPath, log.ToString());
-                                    // Debug log written successfully
-                                }
-                                else
-                                {
-                                    log.AppendLine($"\n=== Post-Commit Verification ===");
-                                    log.AppendLine($"Dimension PERSISTED: False - Element was deleted!");
-                                    File.WriteAllText(logPath, log.ToString());
-                                    // Dimension was deleted
-                                }
-                                return; // Exit early since we already committed
-                            }
-                            else
-                            {
-                                log.AppendLine($"\n=== Creation Failed ===");
-                                log.AppendLine($"AngularDimension.Create returned NULL!");
-                                File.WriteAllText(logPath, log.ToString());
-                                // Create returned null
-                            }
-                        }
-                        else
-                        {
-                            // No dimension type found
-                        }
+                        XYZ split = start + (end - start).Normalize() * legLength;
+                        result.Append(Line.CreateBound(start, split));
+                        result.Append(Line.CreateBound(split, end));
                     }
                     else
                     {
-                         // Debug: No boundaries found
+                        XYZ split = end + (start - end).Normalize() * legLength;
+                        result.Append(Line.CreateBound(start, split));
+                        result.Append(Line.CreateBound(split, end));
                     }
-
-                    trans.Commit();
                 }
-                catch (Exception ex)
+                else
                 {
-                   TaskDialog.Show("Error", "Angular Dimension Failed: " + ex.Message + "\nStack: " + ex.StackTrace);
-                }
+                    result.Append(curve);
                 }
             }
-            */
+
+            return result;
+        }
+
+        private static IEnumerable<Tuple<Line, Reference>> GetReferencedLines(GeometryElement geometry)
+        {
+            foreach (GeometryObject geomObj in geometry)
+            {
+                if (geomObj is Line line && line.Reference != null)
+                {
+                    yield return Tuple.Create(line, line.Reference);
+                }
+                else if (geomObj is Solid solid)
+                {
+                    foreach (Edge edge in solid.Edges)
+                    {
+                        if (edge.Reference != null && edge.AsCurve() is Line edgeLine)
+                            yield return Tuple.Create(edgeLine, edge.Reference);
+                    }
+                }
+                else if (geomObj is GeometryInstance instance)
+                {
+                    foreach (var nested in GetReferencedLines(instance.GetSymbolGeometry()))
+                        yield return nested;
+                }
+            }
+        }
+
+        private static double DistanceXY(XYZ a, XYZ b)
+        {
+            double dx = a.X - b.X, dy = a.Y - b.Y;
+            return Math.Sqrt(dx * dx + dy * dy);
         }
 
         private CurveLoop SimplifyBoundary(List<FOVPoint> rawPoints)
