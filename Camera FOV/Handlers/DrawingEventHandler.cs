@@ -2,7 +2,6 @@
 using Autodesk.Revit.DB.Structure;
 using Autodesk.Revit.UI;
 using Camera_FOV.Utils;
-using Camera_FOV.Utils;
 using Camera_FOV;
 using Camera_FOV.Services;
 
