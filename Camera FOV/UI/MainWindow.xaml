@@ -314,7 +314,7 @@
                                         DockPanel.Dock="Right"
                                         Style="{StaticResource Type.Unit}"
                                         Text="25 px/m" />
-                                    <Border Background="{StaticResource Dori.Detection}" Style="{StaticResource Swatch}" />
+                                    <Border Background="{DynamicResource Dori.Detection}" Style="{StaticResource Swatch}" />
                                     <TextBlock Style="{StaticResource Type.Body}" Text="Detection" />
                                 </DockPanel>
                             </CheckBox>
@@ -334,7 +334,7 @@
                                         DockPanel.Dock="Right"
                                         Style="{StaticResource Type.Unit}"
                                         Text="63 px/m" />
-                                    <Border Background="{StaticResource Dori.Observation}" Style="{StaticResource Swatch}" />
+                                    <Border Background="{DynamicResource Dori.Observation}" Style="{StaticResource Swatch}" />
                                     <TextBlock Style="{StaticResource Type.Body}" Text="Observation" />
                                 </DockPanel>
                             </CheckBox>
@@ -354,7 +354,7 @@
                                         DockPanel.Dock="Right"
                                         Style="{StaticResource Type.Unit}"
                                         Text="125 px/m" />
-                                    <Border Background="{StaticResource Dori.Recognition}" Style="{StaticResource Swatch}" />
+                                    <Border Background="{DynamicResource Dori.Recognition}" Style="{StaticResource Swatch}" />
                                     <TextBlock Style="{StaticResource Type.Body}" Text="Recognition" />
                                 </DockPanel>
                             </CheckBox>
@@ -374,7 +374,7 @@
                                         DockPanel.Dock="Right"
                                         Style="{StaticResource Type.Unit}"
                                         Text="250 px/m" />
-                                    <Border Background="{StaticResource Dori.Identification}" Style="{StaticResource Swatch}" />
+                                    <Border Background="{DynamicResource Dori.Identification}" Style="{StaticResource Swatch}" />
                                     <TextBlock Style="{StaticResource Type.Body}" Text="Identification" />
                                 </DockPanel>
                             </CheckBox>

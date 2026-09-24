@@ -42,13 +42,4 @@
     <Thickness x:Key="Pad.Page">16,4,16,16</Thickness>
     <Thickness x:Key="Pad.CardRow">12,0,12,0</Thickness>
 
-    <!--
-        DORI coverage colours: the exact fills of the filled region types the plugin creates
-        (DrawingEventHandler), so each option maps visibly to what appears in the plan.
-    -->
-    <SolidColorBrush x:Key="Dori.Detection" Color="#FFFFD5D5" />
-    <SolidColorBrush x:Key="Dori.Observation" Color="#FFFFFCE8" />
-    <SolidColorBrush x:Key="Dori.Recognition" Color="#FFDFEFFF" />
-    <SolidColorBrush x:Key="Dori.Identification" Color="#FFE2FCE7" />
-
 </ResourceDictionary>

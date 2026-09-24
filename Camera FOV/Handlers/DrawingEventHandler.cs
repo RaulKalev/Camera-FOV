@@ -494,15 +494,20 @@ namespace Camera_FOV.Handlers
         }
     }
 
-    // Categories that act as obstructions when traced. Doors are intentionally left out: wall
-    // solids already have door openings cut out of them, so skipping the door leaf keeps the
-    // opening open instead of closing the wall across it.
+    // Doors and windows whose opening crosses the cut plane get one line across the opening along
+    // the wall, instead of their detailed geometry, so the wall outline stays closed there.
+    private static readonly List<BuiltInCategory> OpeningCategories = new List<BuiltInCategory>
+    {
+        BuiltInCategory.OST_Doors,
+        BuiltInCategory.OST_Windows
+    };
+
+    // Categories whose solids are traced where they cross the cut plane.
     private static readonly List<BuiltInCategory> TracedCategories = new List<BuiltInCategory>
     {
         BuiltInCategory.OST_Walls,
         BuiltInCategory.OST_StructuralColumns,
         BuiltInCategory.OST_Columns,
-        BuiltInCategory.OST_Windows,
         BuiltInCategory.OST_CurtainWallPanels,
         BuiltInCategory.OST_CurtainWallMullions
     };
@@ -524,19 +529,24 @@ namespace Camera_FOV.Handlers
         public int LinesCreated;
         public int LinesReplaced;
         public int ElementsTraced;
+        public int OpeningsCollected;
+        public int OpeningsFound;
+        public int OpeningsAtCut;
+        public int OpeningsClosed;
+        public int LayeredWalls;
         public int ElementsBelowOrAboveCut;
         public int LinksTraced;
         public int LinksNotLoaded;
         public int SectionFailures;
     }
 
-    // Traces the footprint of walls, columns, windows and curtain wall parts where they cross the
-    // active plan's cut plane. Elements that do not reach the cut plane (e.g. low walls) and
-    // geometry on other floors are not traced. Lines from a previous trace in this view are
-    // replaced; user-drawn Boundary lines are kept.
+    // Traces the footprint of walls, columns and curtain wall parts where they cross the active
+    // plan's cut plane, and draws one line across each door or window opening at that height.
+    // Elements that do not reach the cut plane (e.g. low walls) and geometry on other floors are
+    // not traced. Lines from a previous trace in this view are replaced; user-drawn Boundary
+    // lines are kept.
     private void TraceWallsAndDrawBoundary()
     {
-
         Document doc = _uiDoc.Document;
 
         try
@@ -575,17 +585,19 @@ namespace Camera_FOV.Handlers
                 .WhereElementIsNotElementType()
                 .ToList();
 
+            var summary = new TraceSummary();
+
+            List<Element> openings = CollectOpenings(new FilteredElementCollector(doc, view.Id), summary);
+
             List<RevitLinkInstance> selectedLinks = SelectLinkedModels(doc, view);
 
-            if (!elements.Any() && !selectedLinks.Any())
+            if (!elements.Any() && !openings.Any() && !selectedLinks.Any())
             {
                 MessageDialog.ShowInfo(
                     "Nothing to trace",
-                    $"No walls, columns, windows or curtain wall parts are visible in “{view.Name}”, and no linked models were chosen. Nothing was changed.");
+                    $"No walls, columns, doors, windows or curtain wall parts are visible in “{view.Name}”, and no linked models were chosen. Nothing was changed.");
                 return;
             }
-
-            var summary = new TraceSummary();
 
             using (Transaction transaction = new Transaction(doc, "Trace Walls and Columns and Draw Boundary"))
             {
@@ -596,6 +608,11 @@ namespace Camera_FOV.Handlers
                 foreach (var element in elements)
                 {
                     TraceElement(element, Transform.Identity, range, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
+                }
+
+                foreach (var opening in openings)
+                {
+                    CloseOpening(opening, Transform.Identity, range, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
                 }
 
                 foreach (var link in selectedLinks)
@@ -742,6 +759,252 @@ namespace Camera_FOV.Handlers
         {
             TraceElement(element, linkTransform, range, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes, summary);
         }
+
+        foreach (var opening in CollectOpenings(new FilteredElementCollector(linkedDoc), summary))
+        {
+            CloseOpening(opening, linkTransform, range, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes, summary);
+        }
+    }
+
+    // Any element in the door or window categories: loadable families as well as the DirectShapes
+    // that IFC links and imports produce.
+    private static List<Element> CollectOpenings(FilteredElementCollector collector, TraceSummary summary)
+    {
+        List<Element> openings = collector
+            .WherePasses(new ElementMulticategoryFilter(OpeningCategories))
+            .WhereElementIsNotElementType()
+            .ToList();
+
+        summary.OpeningsCollected += openings.Count;
+        return openings;
+    }
+
+    // Draws one line across a door or window opening where it crosses the cut plane. Openings
+    // entirely above or below it leave the wall solid there, so the wall trace already closes them.
+    private void CloseOpening(Element opening, Transform toHost, TraceRange range, View view, GraphicsStyle boundaryLineStyle, Document doc, HashSet<string> drawnCurveHashes, TraceSummary summary)
+    {
+        BoundingBoxXYZ box = opening.get_BoundingBox(null);
+        if (box == null) return;
+
+        GetHostZRange(box, toHost, out double minZ, out double maxZ);
+        if (maxZ < range.BottomZ || minZ > range.TopZ) return; // Another floor
+
+        summary.OpeningsFound++;
+        if (minZ > range.CutZ + GeometryTolerance || maxZ < range.CutZ - GeometryTolerance) return;
+        summary.OpeningsAtCut++;
+
+        // Both are in the opening's own document; the line is moved to the host at the end
+        if (!TryGetLineAlongHostWall(opening, box, out XYZ start, out XYZ end) &&
+            !TryGetLineAlongFootprint(opening, out start, out end))
+            return;
+
+        try
+        {
+            Line line = Line.CreateBound(start, end);
+            int before = summary.LinesCreated;
+            DrawTracedCurve(line.CreateTransformed(toHost), range.ViewPlane, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
+            if (summary.LinesCreated > before)
+                summary.OpeningsClosed++;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to close opening {opening.Id}: {ex.Message}");
+        }
+    }
+
+    // A door or window family hosted in a wall: a line on the wall's location line, as wide as the opening.
+    private static bool TryGetLineAlongHostWall(Element opening, BoundingBoxXYZ box, out XYZ start, out XYZ end)
+    {
+        start = end = null;
+
+        if (!(opening is FamilyInstance instance)) return false;
+        if (!(instance.Host is Wall wall) || !(wall.Location is LocationCurve wallLocation)) return false;
+        if (!(instance.Location is LocationPoint openingLocation)) return false;
+
+        Curve wallCurve = wallLocation.Curve;
+        IntersectionResult onWall = wallCurve.Project(openingLocation.Point);
+        if (onWall == null) return false;
+
+        XYZ tangent = wallCurve.ComputeDerivatives(onWall.Parameter, false).BasisX;
+        XYZ direction = new XYZ(tangent.X, tangent.Y, 0);
+        if (direction.IsZeroLength()) return false;
+        direction = direction.Normalize();
+
+        XYZ center = onWall.XYZPoint;
+        if (!TryGetOpeningExtent(instance, box, center, direction, out double from, out double to)) return false;
+
+        start = center + direction * from;
+        end = center + direction * to;
+        return true;
+    }
+
+    // Anything else (e.g. an IFC DirectShape): the line runs along the long side of the smallest
+    // rectangle around the element's plan footprint, through its middle. For a door or window
+    // that is the direction of the wall it sits in.
+    private static bool TryGetLineAlongFootprint(Element opening, out XYZ start, out XYZ end)
+    {
+        start = end = null;
+
+        GeometryElement geometry = opening.get_Geometry(new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Coarse });
+        if (geometry == null) return false;
+
+        var points = new List<UV>();
+        double z = 0;
+        foreach (XYZ point in GetGeometryPoints(geometry))
+        {
+            points.Add(new UV(point.X, point.Y));
+            z = point.Z;
+        }
+
+        List<UV> hull = ConvexHull(points);
+        if (hull.Count < 2) return false;
+
+        // Minimum-area rectangle: one of its sides lies along an edge of the convex hull
+        double bestArea = double.MaxValue;
+        UV bestAxis = null;
+        double bestMin = 0, bestMax = 0, bestCross = 0;
+
+        for (int i = 0; i < hull.Count; i++)
+        {
+            UV edge = hull[(i + 1) % hull.Count] - hull[i];
+            if (edge.GetLength() < GeometryTolerance) continue;
+            UV axis = edge.Normalize();
+            UV normal = new UV(-axis.V, axis.U);
+
+            double minA = double.MaxValue, maxA = double.MinValue, minN = double.MaxValue, maxN = double.MinValue;
+            foreach (UV p in hull)
+            {
+                double a = p.DotProduct(axis), n = p.DotProduct(normal);
+                minA = Math.Min(minA, a); maxA = Math.Max(maxA, a);
+                minN = Math.Min(minN, n); maxN = Math.Max(maxN, n);
+            }
+
+            double area = (maxA - minA) * (maxN - minN);
+            if (area >= bestArea) continue;
+
+            // Keep the long side as the axis
+            bestArea = area;
+            if (maxA - minA >= maxN - minN)
+            {
+                bestAxis = axis; bestMin = minA; bestMax = maxA; bestCross = (minN + maxN) / 2;
+            }
+            else
+            {
+                bestAxis = normal; bestMin = minN; bestMax = maxN; bestCross = -(minA + maxA) / 2;
+            }
+        }
+
+        if (bestAxis == null || bestMax - bestMin < GeometryTolerance) return false;
+
+        // Point = axis * along + perpendicular * across, with perpendicular = (-axis.V, axis.U)
+        UV perpendicular = new UV(-bestAxis.V, bestAxis.U);
+        UV a0 = bestAxis * bestMin + perpendicular * bestCross;
+        UV a1 = bestAxis * bestMax + perpendicular * bestCross;
+        start = new XYZ(a0.U, a0.V, z);
+        end = new XYZ(a1.U, a1.V, z);
+        return true;
+    }
+
+    private static IEnumerable<XYZ> GetGeometryPoints(GeometryElement geometry)
+    {
+        foreach (GeometryObject geomObj in geometry)
+        {
+            if (geomObj is Solid solid)
+            {
+                foreach (Edge edge in solid.Edges)
+                foreach (XYZ point in edge.Tessellate())
+                    yield return point;
+            }
+            else if (geomObj is Mesh mesh)
+            {
+                foreach (XYZ point in mesh.Vertices)
+                    yield return point;
+            }
+            else if (geomObj is Curve curve && curve.IsBound)
+            {
+                foreach (XYZ point in curve.Tessellate())
+                    yield return point;
+            }
+            else if (geomObj is GeometryInstance instance)
+            {
+                foreach (XYZ point in GetGeometryPoints(instance.GetInstanceGeometry()))
+                    yield return point;
+            }
+        }
+    }
+
+    // Andrew's monotone chain; returns the hull counter-clockwise without repeating the first point.
+    private static List<UV> ConvexHull(List<UV> points)
+    {
+        var sorted = points
+            .GroupBy(p => (Math.Round(p.U, 6), Math.Round(p.V, 6)))
+            .Select(g => g.First())
+            .OrderBy(p => p.U).ThenBy(p => p.V)
+            .ToList();
+        if (sorted.Count < 3) return sorted;
+
+        double Cross(UV o, UV a, UV b) => (a.U - o.U) * (b.V - o.V) - (a.V - o.V) * (b.U - o.U);
+
+        var hull = new List<UV>();
+        foreach (var pass in new[] { sorted, Enumerable.Reverse(sorted).ToList() })
+        {
+            int start = hull.Count;
+            foreach (UV p in pass)
+            {
+                while (hull.Count >= start + 2 && Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0)
+                    hull.RemoveAt(hull.Count - 1);
+                hull.Add(p);
+            }
+            hull.RemoveAt(hull.Count - 1);
+        }
+
+        return hull;
+    }
+
+    // Offsets from the centre along the wall that span the opening. Uses the widest of the family's
+    // width parameters (the rough opening is usually wider than the leaf), falling back to the
+    // element's extent along the wall.
+    private static bool TryGetOpeningExtent(FamilyInstance opening, BoundingBoxXYZ box, XYZ center, XYZ direction, out double from, out double to)
+    {
+        var widthParameters = new[]
+        {
+            BuiltInParameter.FAMILY_ROUGH_WIDTH_PARAM,
+            BuiltInParameter.FAMILY_WIDTH_PARAM,
+            BuiltInParameter.DOOR_WIDTH,
+            BuiltInParameter.WINDOW_WIDTH
+        };
+
+        double width = 0;
+        foreach (Element source in new Element[] { opening, opening.Symbol })
+        {
+            if (source == null) continue;
+            foreach (BuiltInParameter id in widthParameters)
+            {
+                Parameter parameter = source.get_Parameter(id);
+                if (parameter != null && parameter.StorageType == StorageType.Double)
+                    width = Math.Max(width, parameter.AsDouble());
+            }
+        }
+
+        if (width > GeometryTolerance)
+        {
+            from = -width / 2;
+            to = width / 2;
+            return true;
+        }
+
+        from = double.MaxValue;
+        to = double.MinValue;
+        foreach (double x in new[] { box.Min.X, box.Max.X })
+        foreach (double y in new[] { box.Min.Y, box.Max.Y })
+        foreach (double z in new[] { box.Min.Z, box.Max.Z })
+        {
+            double along = (box.Transform.OfPoint(new XYZ(x, y, z)) - center).DotProduct(direction);
+            from = Math.Min(from, along);
+            to = Math.Max(to, along);
+        }
+
+        return to - from > GeometryTolerance;
     }
 
     // toHost maps the element's own document coordinates to host coordinates
@@ -773,16 +1036,35 @@ namespace Camera_FOV.Handlers
             toLocal.OfVector(range.CutPlane.Normal),
             toLocal.OfPoint(range.CutPlane.Origin));
 
-        bool hasSolids = false;
-        bool traced = false;
-        foreach (Solid solid in GetSolids(geometry))
+        List<Solid> solids = GetSolids(geometry).ToList();
+
+        // A compound wall returns one solid per layer; merge them so only its outer faces are traced
+        bool isWall = element is Wall;
+        if (isWall && solids.Count > 1)
         {
-            hasSolids = true;
-            foreach (Curve sectionCurve in SectionSolid(solid, localCutPlane, summary))
-            {
-                traced = true;
-                DrawTracedCurve(sectionCurve.CreateTransformed(toHost), range.ViewPlane, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
-            }
+            solids = MergeSolids(solids);
+            summary.LayeredWalls++;
+        }
+
+        List<List<Curve>> sections = solids.Select(solid => SectionSolid(solid, localCutPlane, summary)).ToList();
+
+        // On the cut plane, an outline edge belongs to exactly one face. An edge found twice is shared
+        // by two faces inside the element: layer interfaces, both when the layers stay separate solids
+        // and when the merged solid keeps one cut face per layer. Those are left out.
+        HashSet<string> interiorEdges = sections
+            .SelectMany(section => section.Select(GenerateEdgeKey))
+            .GroupBy(key => key)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet();
+
+        bool hasSolids = solids.Any();
+        bool traced = false;
+        foreach (Curve sectionCurve in sections.SelectMany(section => section))
+        {
+            traced = true;
+            if (interiorEdges.Contains(GenerateEdgeKey(sectionCurve))) continue;
+            DrawTracedCurve(sectionCurve.CreateTransformed(toHost), range.ViewPlane, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
         }
 
         if (traced)
@@ -805,6 +1087,36 @@ namespace Camera_FOV.Handlers
             minZ = Math.Min(minZ, hostZ);
             maxZ = Math.Max(maxZ, hostZ);
         }
+    }
+
+    // Unions the solids into as few as possible. A solid that fails to union (e.g. it only touches
+    // at an edge) is kept separately, so nothing is lost from the trace.
+    private static List<Solid> MergeSolids(List<Solid> solids)
+    {
+        if (solids.Count < 2) return solids;
+
+        Solid merged = solids[0];
+        var separate = new List<Solid>();
+
+        for (int i = 1; i < solids.Count; i++)
+        {
+            try
+            {
+                Solid union = BooleanOperationsUtils.ExecuteBooleanOperation(merged, solids[i], BooleanOperationsType.Union);
+                if (union != null && union.Volume > 0)
+                    merged = union;
+                else
+                    separate.Add(solids[i]);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to merge wall layers: {ex.Message}");
+                separate.Add(solids[i]);
+            }
+        }
+
+        separate.Insert(0, merged);
+        return separate;
     }
 
     private static IEnumerable<Solid> GetSolids(GeometryElement geometry)
@@ -893,6 +1205,29 @@ namespace Camera_FOV.Handlers
             items.Add(new MessageDialog.Item("Previous trace replaced",
                 $"{summary.LinesReplaced} lines from the last trace were removed. Boundary lines you drew yourself were kept."));
 
+        if (summary.OpeningsCollected == 0)
+        {
+            items.Add(new MessageDialog.Item("Doors and windows", "No elements in the Doors or Windows categories were found in this view or the chosen linked models."));
+        }
+        else if (summary.OpeningsFound == 0)
+        {
+            items.Add(new MessageDialog.Item("Doors and windows",
+                $"{summary.OpeningsCollected} doors and windows were found, but none are within this view’s range (they are on other floors)."));
+        }
+        else
+        {
+            string openings = $"{summary.OpeningsClosed} of {summary.OpeningsAtCut} door and window openings at the cut plane were closed with a line across them.";
+            if (summary.OpeningsAtCut < summary.OpeningsFound)
+                openings += $" {summary.OpeningsFound - summary.OpeningsAtCut} are above or below the cut plane, where the wall is already solid.";
+            if (summary.OpeningsClosed < summary.OpeningsAtCut)
+                openings += $" {summary.OpeningsAtCut - summary.OpeningsClosed} had no geometry to measure, or their line matched one already drawn.";
+            items.Add(new MessageDialog.Item("Doors and windows", openings));
+        }
+
+        if (summary.LayeredWalls > 0)
+            items.Add(new MessageDialog.Item("Layered walls",
+                $"{summary.LayeredWalls} walls with several layers were traced as one outline."));
+
         if (summary.LinksTraced > 0)
             items.Add(new MessageDialog.Item("Linked models", $"{summary.LinksTraced} linked models were traced as well."));
 
@@ -916,6 +1251,13 @@ namespace Camera_FOV.Handlers
             "Boundaries traced",
             message,
             items);
+    }
+
+    // Endpoints plus midpoint, so the two halves of a circle (same endpoints) stay distinct.
+    private string GenerateEdgeKey(Curve curve)
+    {
+        XYZ mid = curve.Evaluate(0.5, true);
+        return $"{GenerateCurveHash(curve)}|{Math.Round(mid.X, 4)},{Math.Round(mid.Y, 4)},{Math.Round(mid.Z, 4)}";
     }
 
     // Helper method to generate a hash for a curve based on its start and end points

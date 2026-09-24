@@ -64,6 +64,15 @@
     <SolidColorBrush x:Key="Status.Success" Color="#FF32D74B" />
     <SolidColorBrush x:Key="Status.SuccessSubtle" Color="#3332D74B" />
 
+    <!--
+        DORI swatches: the same hues as the filled region types the plugin creates (red, yellow, blue,
+        green), in a pastel strong enough to read on the panel. The region fills in the plan stay pale.
+    -->
+    <SolidColorBrush x:Key="Dori.Detection" Color="#FFF28B82" />
+    <SolidColorBrush x:Key="Dori.Observation" Color="#FFFDD663" />
+    <SolidColorBrush x:Key="Dori.Recognition" Color="#FF8AB4F8" />
+    <SolidColorBrush x:Key="Dori.Identification" Color="#FF81C995" />
+
     <!--  Lists  -->
     <SolidColorBrush x:Key="Row.Hover" Color="#12FFFFFF" />
 
