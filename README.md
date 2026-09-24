@@ -1,93 +1,68 @@
-# Camera FOV for Autodesk Revit
+# Camera FOV for Revit
 
-A comprehensive Revit plugin designed to calculate and visualize Security Camera Field of View (FOV) based on DORI (Detection, Observation, Recognition, Identification) standards.
+Draw what your security cameras can see, straight onto your Revit floor plans.
 
-## Supported Revit Versions
+Camera FOV turns a camera family into coverage areas for the four DORI levels (Detection, Observation, Recognition, Identification). Walls, columns, doors and windows cut the view where they block it. When the design changes, the plugin tells you which cameras need redrawing.
 
-- **Revit 2024**
-- **Revit 2026**
+<p align="center">
+  <img src="docs/images/main-window.png" alt="The Camera FOV window" width="340">
+</p>
 
-*Note: The plugin has been tested in these versions but may work in other versions if the Revit API supports the required features.*
+## What you can do
 
-## Features
+- **Draw coverage.** Pick a camera, tick the DORI levels you need and press **Draw coverage**. Each level becomes its own coloured area, and the field-of-view angle is dimensioned for you.
+- **Let walls block the view.** **Trace walls** turns the walls, columns, doors and windows at the plan's cut height into boundary lines, including those in linked models. You can also draw boundary lines yourself.
+- **Keep drawings up to date.** Move or rotate a camera and the plugin shows that its coverage is out of date. Press **Update** to redraw it.
+- **Check a spot.** Click a point in the plan to see which cameras cover it, how many pixels per metre each gives, and why the others don't.
+- **Audit a whole floor.** See gaps and overlaps of all cameras at once, per DORI level, against the rooms on that floor.
 
-- **FOV Visualization**: Generates precise 2D filled regions representing the camera's coverage area directly in your Revit views.
-- **DORI Standards**: Built-in presets for DORI zones:
-  - **Detection** (25px/m)
-  - **Observation** (63px/m)
-  - **Recognition** (125px/m)
-  - **Identification** (250px/m)
-- **Multi-Zone Visualization**: Draw multiple DORI regions simultaneously to analyze all coverage zones at once.
-- **Boundary Tracing**: Automatically traces walls, columns, windows and curtain walls from both local and linked models to create precise visual boundaries. Tracing follows the active plan's view range (see below).
-- **Manual Boundary Definition**: Uses detail lines to allow users to manually define visual boundaries for the FOV.
-- **Smart Rotation**: Auto-detects camera orientation from Revit families and supports manual rotation offsets.
-- **Customizable**: Adjustable max distance, FOV angle, and resolution settings.
-- **Modern UI**: Features a sleek interface with Dark/Light theme support.
+<p align="center">
+  <img src="docs/images/coverage-audit.png" alt="Coverage audit showing the best DORI level across a floor" width="720">
+</p>
 
-## Installation
-**Recommended:**
-1.  Go to the [Releases](https://github.com/RaulKalev/Camera-FOV/releases) page.
-2.  Download the **CameraFOV_Installer.exe**.
-3.  Run the installer (it will automatically detect Revit 2024 and 2026 locations).
+## Install
 
-**Manual Installation (Advanced/Unsupported Versions):**
-If use older Revit versions, you can attempt to install manually, but **this is untested and proceeded at your own risk**.
-1.  Copy the `CameraFOV.addin` file to `%ProgramData%/Autodesk/Revit/Addins/[Year]/`.
-2.  Copy the `Camera FOV` folder (containing DLLs) to the same location.
-3.  Ensure you use the correct .NET version (.NET 4.8(used in Revit 2024 build) for Revit < 2025).
+1. Download **CameraFOV_Installer.exe** from the [Releases](https://github.com/RaulKalev/Camera-FOV/releases) page.
+2. Run it. It finds Revit 2024 and 2026 by itself.
+3. Start Revit. The plugin is on the **RK Tools** tab.
 
-## Usage
+## Getting started
 
-1. Open a Floor Plan view in Revit.
-2. Go to the **RK Tools** tab.
-3. Click **Run Camera FOV plugin**.
-4. Select a security camera element.
-5. Adjust DORI settings, Resolution, and Angle as needed.
-6. Click **"Draw"** to generate the FOV visualization.
+1. Open a floor plan.
+2. Open **Settings** (the gear icon) and create the **Boundary** line style and the **DORI region types**. You only need to do this once per project.
+3. Press **Trace walls** in Settings to turn the walls into boundary lines.
+4. In the main window, press **Select** and click a camera in the plan.
+5. Check the field of view, resolution and rotation, tick the DORI levels, and press **Draw coverage**.
 
-## Requirements
+Scroll the mouse wheel to zoom in the audit, hold it down to pan, and double-click it to zoom out.
 
-### Revit Families
-The plugin works with elements in the **Security Devices** category (`OST_SecurityDevices`).
-For full functionality, the families should contain the following parameters (Parameter names are configurable in Settings):
+## Your camera family
 
-| Parameter Name | Scope | Data Type | Description |
-| :--- | :--- | :--- | :--- |
-| **Vaatenurk** | Instance/Type | Angle | The camera's Field of View angle (in degrees). |
-| **Horisontaalne Resolutsioon** | Instance/Type | Text | The sensor's horizontal resolution (e.g. "1920" or "1920 px"). |
-| **Pööra Kaamerat** | Instance | Angle | (Optional) Manual rotation offset for the camera (in degrees). |
-| **Kaamera nurk** | Instance | Angle | (Optional) Manual Field of View angle override. |
+The plugin works with families in the **Security Devices** category. It reads these parameters when they exist. You can rename them in Settings to match your own families.
 
-## Technical Overview
+| Parameter | What it's for |
+| :--- | :--- |
+| **Vaatenurk** | The camera's field of view angle |
+| **Horisontaalne Resolutsioon** | Horizontal resolution in pixels, e.g. `3840` |
+| **Pööra Kaamerat** | Rotation of the camera (optional) |
+| **Kaamera nurk** | A field of view that overrides the standard one (optional) |
 
-### How it Works
-The FOV generation uses an intelligent algorithm to simulate the camera's line of sight. 
-1. **Ray Emission**: The system casts rays across the specified Field of View angle.
-2. **Boundary Definition**: It detects Detail Lines to limit the FOV, allowing users to manually define obstacles or view limits.
-3. **Geometry Synthesis**: Intersection points are connected to form a closed loop, generating a `FilledRegion` that accurately represents the visible area.
+If a family has none of these, type the field of view and pick the resolution in the window instead.
 
-### Automatic Boundary Tracing
-Tracing runs in the active plan view and uses that view's **cut plane** as the trace elevation:
-- Walls, columns, windows and curtain wall panels/mullions are sectioned at the cut plane, and only that section outline becomes Boundary lines. Top and bottom edges of tall walls, and geometry on other floors, are not traced.
-- Linked models are positioned with their instance transform (offset, rotation, elevation) before sectioning, so the host plan's view range decides what is traced, not the link's own levels.
-- Elements inside the view range that do not reach the cut plane (for example low walls) are skipped and counted in the summary. Draw Boundary lines manually for any that should block the camera.
-- Doors are not traced: the door opening in the wall stays open.
-- Lines created by tracing are tagged. Running the trace again replaces them and keeps manually drawn Boundary lines. Unloaded links are skipped and counted.
+## More screenshots
 
-### Coverage Persistence
-Each coverage region stores its camera, DORI region type and view inside the project. Redrawing a camera replaces its previous region of the same DORI type in that view, also after reopening the window or the project. Copied regions and regions drawn by older versions of the plugin are never deleted automatically; remove those manually if needed.
+<p align="center">
+  <img src="docs/images/point-check.png" alt="Point check result" width="380">
+  <img src="docs/images/settings.png" alt="Settings window" width="260">
+</p>
 
-### DORI Calculation
-The maximum effective range is dynamically calculated based on the **DORI standard** (Pixels Per Meter), ensuring the visualization meets specific security requirements (Detection, Observation, Recognition, Identification). 
-The formula derives the maximum distance from the camera's **Resolution** and **Field of View**, adhering to the mathematical relationship between pixel density and arc length.
+## Good to know
 
-## Changelog
-
-### Latest
-- **Fix**: FOV filled region arc (curved far end) was being drawn as a straight line. The boundary now correctly renders as a proper arc when the camera has unobstructed line of sight.
-- **Fix**: "Could not generate a valid filled region boundary" error occurring when Boundary detail lines include full-circle (unbound) curves. These are now handled gracefully.
-- **Improvement**: Boundary intersection engine rewritten for better performance — rays are cast using pure 2D math instead of Revit API geometry operations, significantly reducing draw time for complex scenes.
+- Everything is calculated on the floor plan. Camera height and tilt aren't taken into account yet.
+- The plugin only changes what it drew itself. Filled regions and boundary lines you drew by hand are kept.
+- DORI distances follow a formula checked against Axis Site Designer.
+- Works in **Revit 2024** and **Revit 2026**.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
