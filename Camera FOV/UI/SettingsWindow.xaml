@@ -210,6 +210,30 @@
                         Style="{StaticResource Type.Caption}"
                         Text="Angle between the rays that trace the coverage outline. Applies to the next drawing." />
 
+                    <!--  ============ Pixel density ============  -->
+                    <TextBlock Style="{StaticResource Type.Group}" Text="Pixel density" />
+                    <Border Style="{StaticResource Card}">
+                        <Grid Style="{StaticResource CardRow}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource Type.Body}" Text="Formula" />
+                            <ComboBox
+                                x:Name="FormulaComboBox"
+                                Grid.Column="1"
+                                MinWidth="150"
+                                AutomationProperties.Name="Pixel density formula"
+                                Style="{StaticResource Input.Combo}"
+                                ToolTip="How pixels per metre and DORI distances are calculated" />
+                        </Grid>
+                    </Border>
+                    <TextBlock
+                        Margin="12,6,12,0"
+                        Style="{StaticResource Type.Caption}"
+                        TextWrapping="Wrap"
+                        Text="IEC 62676-4:2026 divides the resolution by the flat scene width, 2 × distance × tan(FOV / 2). Legacy uses the arc length of the view, as Axis Site Designer does, and gives longer distances for wide lenses. Coverage drawn with the other formula is marked out of date. Applies to all projects." />
+
                     <!--  ============ Angle dimension ============  -->
                     <TextBlock Style="{StaticResource Type.Group}" Text="Angle dimension" />
                     <Border Style="{StaticResource Card}">

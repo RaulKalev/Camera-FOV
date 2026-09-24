@@ -1,8 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 
 namespace Camera_FOV.Models
 {
+    /// <summary>How pixel density at a distance is calculated (issue #11).</summary>
+    public enum PixelDensityFormula
+    {
+        // EVS-EN IEC 62676-4:2026, Figure 4: horizontal pixels over the flat scene width 2 × d × tan(FOV / 2)
+        Standard,
+        // Horizontal pixels over the arc length of the view 2π × d × FOV / 360, matching Axis Site Designer (issue #2)
+        Legacy
+    }
+
     public class PluginSettings
     {
         public double FOVAngle { get; set; } = 93.0; // Default FOV angle
@@ -22,6 +33,11 @@ namespace Camera_FOV.Models
         // turns the dimension off; a name missing from a project falls back to another angular type.
         public string FovDimensionTypeName { get; set; } = "Kaamera nurk";
         public double FovDimensionDistanceMeters { get; set; } = 2.0;
+
+        // Used by drawing, the point check and the audit. Coverage records the formula it was drawn
+        // with, so switching marks coverage drawn with the other one as out of date.
+        [JsonConverter(typeof(StringEnumConverter))]
+        public PixelDensityFormula PixelDensityFormula { get; set; } = PixelDensityFormula.Standard;
 
         // Flip the camera family when drawing if its 2D symbol ends up pointing away from the coverage
         public bool AutoFlipCameraSymbol { get; set; } = true;

@@ -1,4 +1,5 @@
 using Autodesk.Revit.DB;
+using Camera_FOV.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -131,7 +132,7 @@ namespace Camera_FOV.Services
         {
             var values = new CameraValues();
 
-            if (status != null && (status.State == CoverageState.Current || status.State == CoverageState.NeedsReview))
+            if (status != null && status.DrawnValuesApply)
             {
                 foreach (ElementId id in status.Regions)
                 {
@@ -148,8 +149,7 @@ namespace Camera_FOV.Services
             if (values.Resolution == null && CameraData.TryGetResolution(camera, out int parameterResolution)) values.Resolution = parameterResolution;
 
             // Coverage drawn before FOV and resolution were recorded: read what's still missing back from its regions
-            if ((values.FovDegrees == null || values.Resolution == null) && values.AimDegrees != null && status != null &&
-                (status.State == CoverageState.Current || status.State == CoverageState.NeedsReview))
+            if ((values.FovDegrees == null || values.Resolution == null) && values.AimDegrees != null && status != null && status.DrawnValuesApply)
             {
                 DeriveFromRegions(camera, status, values);
             }
@@ -171,6 +171,7 @@ namespace Camera_FOV.Services
             double maxOffAxis = 0;
             DoriLevel outermost = null;
             double reach = 0;
+            PixelDensityFormula formula = PixelDensityFormula.Legacy;
 
             foreach (ElementId id in status.Regions)
             {
@@ -180,8 +181,11 @@ namespace Camera_FOV.Services
                 if (level != null && (outermost == null || level.PixelsPerMeter < outermost.PixelsPerMeter))
                 {
                     outermost = level;
-                    if (ElementTagStorage.TryGetCoverageSource(region, out _, out _, out double storedReach))
+                    if (ElementTagStorage.TryGetCoverageSource(region, out string state, out _, out double storedReach))
+                    {
                         reach = storedReach;
+                        formula = CoverageSource.GetDrawnFormula(state);
+                    }
                 }
 
                 foreach (CurveLoop loop in region.GetBoundaries())
@@ -201,7 +205,7 @@ namespace Camera_FOV.Services
             if (values.Resolution == null && values.FovDegrees != null && outermost != null && reach > 0)
             {
                 double reachMeters = reach * 0.3048;
-                double resolution = outermost.PixelsPerMeter * 2 * Math.PI * values.FovDegrees.Value * reachMeters / 360.0;
+                double resolution = CameraData.ResolutionFor(outermost.PixelsPerMeter, values.FovDegrees.Value, reachMeters, formula);
                 if (resolution > 0) values.Resolution = SnapResolution(resolution);
             }
         }

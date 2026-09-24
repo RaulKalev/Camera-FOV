@@ -310,34 +310,33 @@ namespace Camera_FOV
                 && resolution > 0;
         }
 
-        // Intentionally custom: derived from and validated against Axis Site Designer results, whose
-        // distances it matches. Do not replace it with textbook lens geometry (see issue #2).
-        private decimal CalculateDORIDistance(int resolution, decimal fov, decimal ppm)
+        // The distance in metres, to one decimal, at which the density falls to the level's px/m, with
+        // the formula chosen in Settings (issue #11). The point check and the audit use the same relation.
+        private static decimal CalculateDORIDistance(int resolution, double fov, DoriLevel level)
         {
-            decimal A = resolution / ppm;
-            decimal B = 360 / fov;
-            decimal C = A * B;
-            decimal D = 2 * (decimal)Math.PI;
-            decimal E = C / D;
-            return Math.Round(E * 0.3048m, 1); // Convert to meters and round to one decimal place
+            double meters = CameraData.DistanceMeters(resolution, fov, level.PixelsPerMeter, CameraData.CurrentFormula);
+            return Math.Round((decimal)meters, 1);
         }
-        private decimal? GetSelectedDORIDistance(int resolution, decimal fov)
+        private decimal? GetSelectedDORIDistance(int resolution, double fov)
         {
-            decimal d = 7.62m; // Detection
-            decimal o = 19.2024m; // Observation
-            decimal r = 38.1m; // Recognition
-            decimal i = 76.2m; // Identification
-
             if (CheckboxDetection.IsChecked == true)
-                return CalculateDORIDistance(resolution, fov, d);
+                return CalculateDORIDistance(resolution, fov, CameraData.Levels[0]);
             if (CheckboxObservation.IsChecked == true)
-                return CalculateDORIDistance(resolution, fov, o);
+                return CalculateDORIDistance(resolution, fov, CameraData.Levels[1]);
             if (CheckboxRecognition.IsChecked == true)
-                return CalculateDORIDistance(resolution, fov, r);
+                return CalculateDORIDistance(resolution, fov, CameraData.Levels[2]);
             if (CheckboxIdentification.IsChecked == true)
-                return CalculateDORIDistance(resolution, fov, i);
+                return CalculateDORIDistance(resolution, fov, CameraData.Levels[3]);
 
             return null; // No checkbox selected
+        }
+
+        // Called after Settings changes the pixel density formula: new distances, and a new status
+        // for the selected camera, whose coverage may have been drawn with the other formula
+        public void RefreshDoriDistances()
+        {
+            UpdateMaxDistance();
+            RequestCoverageCheck();
         }
         private void InitializeDoriRegionMapping()
         {
@@ -366,7 +365,7 @@ namespace Camera_FOV
                     return;
                 }
 
-                decimal? distance = GetSelectedDORIDistance(resolution, (decimal)fov);
+                decimal? distance = GetSelectedDORIDistance(resolution, fov);
                 if (distance.HasValue)
                 {
                     MaxDistanceTextBox.Text = $"{distance.Value} m";
@@ -879,13 +878,13 @@ namespace Camera_FOV
                         $"“{RotationAngleTextBox.Text}” is not a number. Enter the rotation in degrees, for example 0 or -45."));
                 }
 
-                // (checkbox, region type name, pixels per foot, draws the angular dimension)
+                // (checkbox, region type name, DORI level, draws the angular dimension)
                 var selectedLevels = new[]
                 {
-                    (Box: CheckboxDetection, TypeName: "dori_25px", Ppf: 7.62m, Dimension: false),
-                    (Box: CheckboxObservation, TypeName: "dori_63px", Ppf: 19.2024m, Dimension: false),
-                    (Box: CheckboxRecognition, TypeName: "dori_125px", Ppf: 38.1m, Dimension: false),
-                    (Box: CheckboxIdentification, TypeName: "dori_250px", Ppf: 76.2m, Dimension: true)
+                    (Box: CheckboxDetection, TypeName: "dori_25px", Level: CameraData.Levels[0], Dimension: false),
+                    (Box: CheckboxObservation, TypeName: "dori_63px", Level: CameraData.Levels[1], Dimension: false),
+                    (Box: CheckboxRecognition, TypeName: "dori_125px", Level: CameraData.Levels[2], Dimension: false),
+                    (Box: CheckboxIdentification, TypeName: "dori_250px", Level: CameraData.Levels[3], Dimension: true)
                 }.Where(l => l.Box.IsChecked == true).ToList();
 
                 if (selectedLevels.Count == 0)
@@ -924,7 +923,7 @@ namespace Camera_FOV
                 var doriLayers = selectedLevels
                     .Select(l => new DoriLayerConfig
                     {
-                        Distance = (double)CalculateDORIDistance(resolution, (decimal)fovAngle, l.Ppf),
+                        Distance = (double)CalculateDORIDistance(resolution, fovAngle, l.Level),
                         TypeId = GetTypeId(l.TypeName),
                         DrawDimension = l.Dimension
                     })

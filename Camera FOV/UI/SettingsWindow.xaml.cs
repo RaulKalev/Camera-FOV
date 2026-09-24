@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using Camera_FOV.Models;
@@ -35,6 +36,15 @@ namespace Camera_FOV
 
             LoadDimensionSettings();
             LoadTracingRules();
+            LoadFormula();
+        }
+
+        private static readonly PixelDensityFormula[] Formulas = { PixelDensityFormula.Standard, PixelDensityFormula.Legacy };
+
+        private void LoadFormula()
+        {
+            FormulaComboBox.ItemsSource = Formulas.Select(CameraData.FormulaName).ToList();
+            FormulaComboBox.SelectedIndex = Math.Max(0, Array.IndexOf(Formulas, SettingsManager.Settings.PixelDensityFormula));
         }
 
         private TracingRules _initialTracingRules;
@@ -165,6 +175,10 @@ namespace Camera_FOV
             SettingsManager.Settings.FovDimensionDistanceMeters = dimensionDistance;
             SettingsManager.Settings.AutoFlipCameraSymbol = AutoFlipCheckBox.IsChecked == true;
 
+            PixelDensityFormula formula = Formulas[Math.Max(0, FormulaComboBox.SelectedIndex)];
+            bool formulaChanged = formula != SettingsManager.Settings.PixelDensityFormula;
+            SettingsManager.Settings.PixelDensityFormula = formula;
+
             // Only written to the project when changed, so saving settings doesn't add an undo step
             TracingRules rules = ReadTracingRules();
             if (!rules.Equals(_initialTracingRules))
@@ -177,6 +191,11 @@ namespace Camera_FOV
 
             SettingsManager.SaveSettings();
             _saved = true;
+
+            // New DORI distances in the window, and the selected camera's coverage checked against the new formula
+            if (formulaChanged)
+                _mainWindow.RefreshDoriDistances();
+
             this.Close();
         }
 

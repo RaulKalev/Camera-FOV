@@ -5,13 +5,15 @@ using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Camera_FOV.Models;
 
 namespace Camera_FOV.Services
 {
     /// <summary>
     /// Captures what a coverage drawing was made from, so a later check can tell whether it still
     /// matches its camera. Two snapshots are stored on every generated region:
-    ///  - the camera state: position, orientation, rotation/FOV/resolution parameters and type;
+    ///  - the camera state: position, orientation, rotation/FOV/resolution parameters, type and the
+    ///    pixel density formula;
     ///  - a fingerprint of the Boundary lines within reach of the camera in the view.
     /// A changed camera state makes the coverage stale. Changed Boundary lines only mark it for review,
     /// because they may or may not affect it. Linked models count once they are traced again, since
@@ -26,6 +28,7 @@ namespace Camera_FOV.Services
         private const string Resolution = "res";
         private const string CameraType = "type";
         private const string FlipState = "flip";
+        private const string Formula = "pdf";
 
         private static readonly Dictionary<string, string> Labels = new Dictionary<string, string>
         {
@@ -34,7 +37,8 @@ namespace Camera_FOV.Services
             { UserRotation, "Rotation" },
             { FieldOfView, "Field of view" },
             { Resolution, "Resolution" },
-            { CameraType, "Camera type" }
+            { CameraType, "Camera type" },
+            { Formula, "Pixel density formula" }
         };
 
         // "key=value;key=value", with values rounded so re-reading an unchanged camera matches exactly.
@@ -59,6 +63,7 @@ namespace Camera_FOV.Services
             values[FieldOfView] = ReadFieldOfView(camera);
             values[Resolution] = ReadResolution(camera);
             values[CameraType] = camera.GetTypeId()?.ToString() ?? "none";
+            values[Formula] = CameraData.CurrentFormula.ToString();
 
             return string.Join(";", values.Select(kv => $"{kv.Key}={kv.Value}"));
         }
@@ -67,12 +72,13 @@ namespace Camera_FOV.Services
         // when the camera was selected, because the drawing used those values even if the camera moved
         // since. Rotation and FOV come from after the draw, which writes the window's values back to
         // the camera. So a camera changed between selecting and drawing is still reported as stale.
+        // The formula also comes from after the draw, since the drawing used the one set then.
         public static string MergeDrawnState(string atSelection, string afterDraw)
         {
             if (string.IsNullOrEmpty(atSelection)) return afterDraw;
 
             Dictionary<string, string> merged = Parse(atSelection), written = Parse(afterDraw);
-            foreach (string key in new[] { UserRotation, FieldOfView })
+            foreach (string key in new[] { UserRotation, FieldOfView, Formula })
             {
                 if (written.TryGetValue(key, out string value))
                     merged[key] = value;
@@ -105,6 +111,16 @@ namespace Camera_FOV.Services
             return TryGetNumber(state, DrawnResolution, out double value) && (resolution = (int)Math.Round(value)) > 0;
         }
 
+        // The pixel density formula the coverage was drawn with; coverage from before it was recorded used the arc length.
+        public static PixelDensityFormula GetDrawnFormula(string state)
+        {
+            return Parse(state).TryGetValue(Formula, out string value) && Enum.TryParse(value, out PixelDensityFormula formula)
+                ? formula
+                : PixelDensityFormula.Legacy;
+        }
+
+        public static string FormulaChangeLabel => Labels[Formula];
+
         private static bool TryGetNumber(string state, string key, out double number)
         {
             number = 0;
@@ -127,6 +143,13 @@ namespace Camera_FOV.Services
                     if (parts.Length >= 3 && !state.ContainsKey(FlipState))
                         state[FlipState] = $"{parts[1]},{parts[2]}";
                 }
+            }
+
+            // Coverage drawn before the formula was recorded used the arc length (issue #11)
+            foreach (var state in new[] { before, now })
+            {
+                if (!state.ContainsKey(Formula))
+                    state[Formula] = PixelDensityFormula.Legacy.ToString();
             }
 
             // The camera's flip arrows mirror the family, which Revit records as a 180° turn of its

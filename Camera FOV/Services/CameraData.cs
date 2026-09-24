@@ -1,4 +1,5 @@
 using Autodesk.Revit.DB;
+using Camera_FOV.Models;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -24,10 +25,10 @@ namespace Camera_FOV.Services
     }
 
     /// <summary>
-    /// Camera values and pixel density shared by the point check (issue #7) and the coverage audit
-    /// (issue #6). The density formula is the inverse of the window's DORI distance formula, which is
-    /// validated against Axis Site Designer (issue #2), so a point at a region's edge gets that
-    /// region's threshold density.
+    /// Camera values and pixel density shared by the drawing, the point check (issue #7) and the
+    /// coverage audit (issue #6). Pixel density and DORI distance are the same relation solved either
+    /// way, so a point at a region's edge gets that region's threshold density. The formula is chosen
+    /// in Settings (issue #11).
     /// </summary>
     public static class CameraData
     {
@@ -39,15 +40,53 @@ namespace Camera_FOV.Services
             new DoriLevel(3, "Identification", 250, "dori_250px")
         };
 
+        public static PixelDensityFormula CurrentFormula => SettingsManager.Settings.PixelDensityFormula;
+
+        public static string FormulaName(PixelDensityFormula formula)
+        {
+            return formula == PixelDensityFormula.Legacy ? "Legacy (arc length)" : "IEC 62676-4:2026";
+        }
+
         /// <summary>
-        /// Horizontal pixels per metre at a distance: resolution × 360 / (2π × FOV × distance).
-        /// The window's DORI distance is the same relation solved for distance.
+        /// Width of the scene per metre of distance.
+        ///  - Standard (EVS-EN IEC 62676-4:2026, Figure 4): the flat width w = 2 × d × tan(FOV / 2),
+        ///    the same as d × sensor width / focal length.
+        ///  - Legacy: the arc length w = 2π × d × FOV / 360, which matches Axis Site Designer (issue #2).
+        /// The flat width has no finite value from 180°, where the lens can't be rectilinear, so wider
+        /// views use the arc length with either formula.
         /// </summary>
+        private static double WidthPerMeter(double fovDegrees, PixelDensityFormula formula)
+        {
+            if (formula == PixelDensityFormula.Standard && fovDegrees < 180)
+                return 2 * Math.Tan(fovDegrees * Math.PI / 360.0);
+            return 2 * Math.PI * fovDegrees / 360.0;
+        }
+
+        /// <summary>Horizontal pixels per metre at a distance, with the formula chosen in Settings.</summary>
         public static double PixelsPerMeter(int resolution, double fovDegrees, double distanceMeters)
+        {
+            return PixelsPerMeter(resolution, fovDegrees, distanceMeters, CurrentFormula);
+        }
+
+        /// <summary>Horizontal pixels per metre at a distance: resolution / scene width.</summary>
+        public static double PixelsPerMeter(int resolution, double fovDegrees, double distanceMeters, PixelDensityFormula formula)
         {
             if (resolution <= 0 || fovDegrees <= 0) return 0;
             if (distanceMeters <= 1e-6) return double.PositiveInfinity;
-            return resolution * 360.0 / (2 * Math.PI * fovDegrees * distanceMeters);
+            return resolution / (WidthPerMeter(fovDegrees, formula) * distanceMeters);
+        }
+
+        /// <summary>The distance in metres at which the density falls to pixelsPerMeter: the window's DORI distance.</summary>
+        public static double DistanceMeters(int resolution, double fovDegrees, double pixelsPerMeter, PixelDensityFormula formula)
+        {
+            if (resolution <= 0 || fovDegrees <= 0 || pixelsPerMeter <= 0) return 0;
+            return resolution / (WidthPerMeter(fovDegrees, formula) * pixelsPerMeter);
+        }
+
+        /// <summary>The horizontal resolution that gives pixelsPerMeter at a distance: the density formula solved for resolution.</summary>
+        public static double ResolutionFor(double pixelsPerMeter, double fovDegrees, double distanceMeters, PixelDensityFormula formula)
+        {
+            return pixelsPerMeter * WidthPerMeter(fovDegrees, formula) * distanceMeters;
         }
 
         /// <summary>The highest DORI level reached at this density, or null below Detection.</summary>

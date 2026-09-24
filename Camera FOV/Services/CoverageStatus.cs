@@ -26,6 +26,15 @@ namespace Camera_FOV.Services
         public List<ElementId> RegionTypeIds { get; private set; } = new List<ElementId>();
         public List<string> Changes { get; private set; } = new List<string>();
 
+        /// <summary>
+        /// Whether the direction, FOV and resolution the coverage was drawn with still describe the
+        /// camera: nothing about the camera changed, though Boundary lines or the pixel density
+        /// formula may have.
+        /// </summary>
+        public bool DrawnValuesApply =>
+            State == CoverageState.Current || State == CoverageState.NeedsReview ||
+            (State == CoverageState.Stale && Changes.All(c => c == CoverageSource.FormulaChangeLabel));
+
         public static CoverageStatus Evaluate(Document doc, View view, Element camera, IEnumerable<ElementId> regionIds)
         {
             List<Element> regions = regionIds
