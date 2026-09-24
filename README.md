@@ -18,7 +18,7 @@ A comprehensive Revit plugin designed to calculate and visualize Security Camera
   - **Recognition** (125px/m)
   - **Identification** (250px/m)
 - **Multi-Zone Visualization**: Draw multiple DORI regions simultaneously to analyze all coverage zones at once.
-- **Boundary Tracing**: Automatically traces walls and columns from both local and linked models to create precise visual boundaries.
+- **Boundary Tracing**: Automatically traces walls, columns, windows and curtain walls from both local and linked models to create precise visual boundaries. Tracing follows the active plan's view range (see below).
 - **Manual Boundary Definition**: Uses detail lines to allow users to manually define visual boundaries for the FOV.
 - **Smart Rotation**: Auto-detects camera orientation from Revit families and supports manual rotation offsets.
 - **Customizable**: Adjustable max distance, FOV angle, and resolution settings.
@@ -65,6 +65,17 @@ The FOV generation uses an intelligent algorithm to simulate the camera's line o
 1. **Ray Emission**: The system casts rays across the specified Field of View angle.
 2. **Boundary Definition**: It detects Detail Lines to limit the FOV, allowing users to manually define obstacles or view limits.
 3. **Geometry Synthesis**: Intersection points are connected to form a closed loop, generating a `FilledRegion` that accurately represents the visible area.
+
+### Automatic Boundary Tracing
+Tracing runs in the active plan view and uses that view's **cut plane** as the trace elevation:
+- Walls, columns, windows and curtain wall panels/mullions are sectioned at the cut plane, and only that section outline becomes Boundary lines. Top and bottom edges of tall walls, and geometry on other floors, are not traced.
+- Linked models are positioned with their instance transform (offset, rotation, elevation) before sectioning, so the host plan's view range decides what is traced, not the link's own levels.
+- Elements inside the view range that do not reach the cut plane (for example low walls) are skipped and counted in the summary. Draw Boundary lines manually for any that should block the camera.
+- Doors are not traced: the door opening in the wall stays open.
+- Lines created by tracing are tagged. Running the trace again replaces them and keeps manually drawn Boundary lines. Unloaded links are skipped and counted.
+
+### Coverage Persistence
+Each coverage region stores its camera, DORI region type and view inside the project. Redrawing a camera replaces its previous region of the same DORI type in that view, also after reopening the window or the project. Copied regions and regions drawn by older versions of the plugin are never deleted automatically; remove those manually if needed.
 
 ### DORI Calculation
 The maximum effective range is dynamically calculated based on the **DORI standard** (Pixels Per Meter), ensuring the visualization meets specific security requirements (Detection, Observation, Recognition, Identification). 

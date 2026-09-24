@@ -42,6 +42,9 @@ namespace Camera_FOV.Utils
             _currentView = currentView ?? throw new ArgumentNullException(nameof(currentView));
         }
 
+        public Document Document => _doc;
+        public View View => _currentView;
+
         public void SetParameters(XYZ position, double distance, double angle, double fovAngle = 90, ElementId filledRegionTypeId = null)
         {
             _currentPosition = position;
@@ -131,7 +134,8 @@ namespace Camera_FOV.Utils
             DrawDetailLine();
         }
 
-        public ElementId DrawFilledRegion(double resolution)
+        // onCreated runs inside the creating transaction, so anything it writes commits with the region.
+        public ElementId DrawFilledRegion(double resolution, Action<FilledRegion> onCreated = null)
         {
             if (_currentPosition == null || _filledRegionTypeId == null)
             {
@@ -245,6 +249,8 @@ namespace Camera_FOV.Utils
                                 if (_doc.GetElement(id) is CurveElement ce)
                                     ce.LineStyle = invisibleLineStyle;
                             }
+
+                            onCreated?.Invoke(region);
 
                             if (trans.Commit() == TransactionStatus.Committed)
                             {
