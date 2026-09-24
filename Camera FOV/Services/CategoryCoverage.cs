@@ -120,6 +120,30 @@ namespace Camera_FOV.Services
             return loops;
         }
 
+        /// <summary>
+        /// Where the category ends along the camera's axis (issue #17): the farthest spot straight ahead
+        /// that still reaches it, stopped by Boundary lines. Null when it isn't reached there.
+        /// </summary>
+        public PlanPoint? EdgeAlongAxis(ObservationCategory category, out double planMeters)
+        {
+            planMeters = 0;
+            if (_angles.Count == 0) return null;
+
+            double aim = Camera.AimDegrees ?? 0;
+            int ray = Enumerable.Range(0, _angles.Count)
+                .OrderBy(i => Math.Abs(Math.IEEERemainder(_angles[i] - aim, 360)))
+                .First();
+
+            double limit = Math.Min(Math.Min(OverviewFeet, DistanceFeet(category.PixelsPerMeter)), _reach[ray]);
+            if (limit <= NearFeet || limit <= 0) return null;
+
+            double r = limit * 0.98; // Just inside, so the spot itself reaches the category
+            planMeters = r * 0.3048;
+            double rad = _angles[ray] * Math.PI / 180.0;
+            PlanPoint c = Camera.Position.Value;
+            return new PlanPoint(c.X + Math.Cos(rad) * r, c.Y + Math.Sin(rad) * r);
+        }
+
         /// <summary>Whether the category is reached anywhere outside the dead zone, ignoring Boundary lines.</summary>
         public bool Reaches(ObservationCategory category)
         {

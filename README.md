@@ -16,6 +16,7 @@ Camera FOV turns a camera family into coverage areas for the four DORI levels (D
 - **Check a spot.** Click a point in the plan to see which cameras cover it, how many pixels per metre each gives, and why the others don't.
 - **Audit a whole floor.** See gaps and overlaps of all cameras at once, per DORI level, against the rooms on that floor. The **IEC categories** view shows the observation categories of IEC 62676-4:2026, and **Requirements** checks rooms and spaces that have a required category (a text parameter "Required category", e.g. `Validate`).
 - **Plan recording storage.** **Recording storage** in the audit works out the storage and network load from a recording schedule per camera type (hours per weekday, Saturday and Sunday, continuous or on motion, data rates, days kept), with the formulas of IEC 62676-4:2026, chapter 10. The plan is saved in the project.
+- **Export for documentation.** **Camera schedule** exports every camera in the view with its settings, the distance each category reaches, its purpose, the rooms it sees, frame rates and recording storage. **Test plan** proposes acceptance test positions for rooms and cameras that need Validate or Scrutinise (or all categories), with the Annex B sample size, as a sheet to fill in on site. Both are CSV files that open in Excel.
 
 <p align="center">
   <img src="docs/images/coverage-audit.png" alt="Coverage audit showing the best DORI level across a floor" width="720">
