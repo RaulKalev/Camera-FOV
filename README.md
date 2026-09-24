@@ -14,7 +14,7 @@ Camera FOV turns a camera family into coverage areas for the four DORI levels (D
 - **Let walls block the view.** **Trace walls** turns the walls, columns, doors and windows at the plan's cut height into boundary lines, including those in linked models. You can also draw boundary lines yourself.
 - **Keep drawings up to date.** Move or rotate a camera and the plugin shows that its coverage is out of date. Press **Update** to redraw it.
 - **Check a spot.** Click a point in the plan to see which cameras cover it, how many pixels per metre each gives, and why the others don't.
-- **Audit a whole floor.** See gaps and overlaps of all cameras at once, per DORI level, against the rooms on that floor.
+- **Audit a whole floor.** See gaps and overlaps of all cameras at once, per DORI level, against the rooms on that floor. The **IEC categories** view shows the observation categories of IEC 62676-4:2026, and **Requirements** checks rooms and spaces that have a required category (a text parameter "Required category", e.g. `Validate`).
 
 <p align="center">
   <img src="docs/images/coverage-audit.png" alt="Coverage audit showing the best DORI level across a floor" width="720">

@@ -36,6 +36,10 @@ namespace Camera_FOV.UI
         // Boundary lines rather than the drawn regions. Cast when first shown, again if the formula changes.
         private const int CategoryMode = -2;
         private bool ShowingCategories => _level == CategoryMode;
+        private const int RequirementMode = -3; // Rooms and spaces with a required category (issue #13)
+        private bool ShowingRequirements => _level == RequirementMode;
+        private bool UsesSights => ShowingCategories || ShowingRequirements;
+        private double[] _bestDensity; // Per grid cell: the highest px/m of any camera, for the sights cast
         private List<CameraSight> _sights;
         private List<List<List<PlanPoint>>> _sightOutlines; // Each sight's Overview outline, as loops
         private List<AuditCamera> _skipped;
@@ -85,6 +89,7 @@ namespace Camera_FOV.UI
             _sightFormula = CameraData.CurrentFormula;
             _sights = CategoryCoverage.Cast(_data, _sightFormula, SettingsManager.Settings.Resolution, out _skipped);
             _sightOutlines = _sights.Select(s => s.Outline(CameraData.Categories[0].PixelsPerMeter)).ToList();
+            _bestDensity = null;
         }
 
         private IEnumerable<AuditRegion> IncludedRegions()
@@ -156,12 +161,20 @@ namespace Camera_FOV.UI
         private void Redraw()
         {
             // The category mode is worked out from the cameras themselves, so drawn coverage being out of date doesn't matter
-            IncludeOutdatedCheckBox.IsEnabled = !ShowingCategories;
-            BasisText.Text = ShowingCategories
+            IncludeOutdatedCheckBox.IsEnabled = !UsesSights;
+            ZoneListScroll.Visibility = ShowingRequirements ? Visibility.Visible : Visibility.Collapsed;
+            BasisText.Text = UsesSights
                 ? "Worked out from each camera’s position, direction, field of view, resolution, height and tilt: density is measured to the target height, and the dead zone under each camera is left out. Anything not drawn as a Boundary line isn’t modelled. Nothing in the model is changed."
                 : "Based on the drawn coverage in plan: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed.";
 
-            if (ShowingCategories)
+            if (ShowingRequirements)
+            {
+                EnsureSights();
+                MeasureRequirements();
+                DrawRequirementMap();
+                ShowCategorySources();
+            }
+            else if (ShowingCategories)
             {
                 EnsureSights();
                 MeasureCategoryAreas();
@@ -248,12 +261,11 @@ namespace Camera_FOV.UI
         }
 
         // Every grid cell takes the highest density of any camera that sees it, then the category that density reaches
-        private void MeasureCategoryAreas()
+        private double[] BestDensity()
         {
-            int cells = _width * _height;
-            double cellArea = _cell * _cell * 0.09290304; // ft² → m²
-            var best = new double[cells];
+            if (_bestDensity != null) return _bestDensity;
 
+            var best = new double[_width * _height];
             for (int s = 0; s < _sights.Count; s++)
             {
                 CameraSight sight = _sights[s];
@@ -266,6 +278,113 @@ namespace Camera_FOV.UI
                     if (density > best[index]) best[index] = density;
                 });
             }
+            return _bestDensity = best;
+        }
+
+        private sealed class ZoneRow
+        {
+            public string Text { get; set; }
+            public Brush Brush { get; set; }
+        }
+
+        // Each zone: the share of its area that reaches its required category, the shortfall and the
+        // best density anywhere in it (issue #13). A zone no camera reaches is listed, not skipped.
+        private void MeasureRequirements()
+        {
+            double cellArea = _cell * _cell * 0.09290304; // ft² → m²
+            double[] best = BestDensity();
+            var rows = new List<(ZoneRow Row, int Order)>();
+            int met = 0, unseen = 0, short_ = 0;
+            double shortfall = 0;
+
+            foreach (AuditZone zone in _data.Zones)
+            {
+                double area = 0, meets = 0, top = 0;
+                Fill(zone.Loops, index =>
+                {
+                    area += cellArea;
+                    if (best[index] >= zone.Required.PixelsPerMeter) meets += cellArea;
+                    top = Math.Max(top, best[index]);
+                });
+
+                string needs = $"{zone.Name}: needs {zone.Required.Name} ({zone.Required.PixelsPerMeter:0} px/m)";
+                if (top <= 0)
+                {
+                    unseen++;
+                    shortfall += area;
+                    rows.Add((new ZoneRow { Text = $"{needs}: no camera sees it ({area:0.#} m²).", Brush = (Brush)FindResource("Status.Error") }, 0));
+                }
+                else if (area - meets < cellArea * 0.5)
+                {
+                    met++;
+                    rows.Add((new ZoneRow { Text = $"{needs}: met everywhere, best {top:0} px/m.", Brush = (Brush)FindResource("Text.Secondary") }, 2));
+                }
+                else
+                {
+                    short_++;
+                    shortfall += area - meets;
+                    rows.Add((new ZoneRow
+                    {
+                        Text = $"{needs}: {Percent(meets, area)} met, {area - meets:0.#} m² short, best {top:0} px/m.",
+                        Brush = (Brush)FindResource("Status.Warning")
+                    }, 1));
+                }
+            }
+
+            ZoneList.ItemsSource = rows.OrderBy(r => r.Order).ThenBy(r => r.Row.Text, StringComparer.CurrentCultureIgnoreCase).Select(r => r.Row).ToList();
+
+            string setting = SettingsManager.Settings.ParameterName_RequiredCategory;
+            if (!_data.Zones.Any())
+            {
+                SummaryText.Text = $"No rooms or spaces at this plan’s cut height have a required category. Give rooms a text parameter “{setting}” " +
+                                   "with the category they need (for example Validate) to check them here.";
+            }
+            else
+            {
+                SummaryText.Text = $"{_data.Zones.Count} rooms or spaces with a required category: {met} met everywhere, {short_} partly short" +
+                                   (unseen > 0 ? $", {unseen} not seen by any camera" : string.Empty) + $". Shortfall {shortfall:0.#} m² in total.";
+            }
+            if (_data.UnreadableZones.Any())
+                SummaryText.Text += $" “{setting}” isn’t a category for: {string.Join(", ", _data.UnreadableZones)}.";
+
+            SetLegend(("Meets its required category", Single), ("Below it", Uncovered), ("Camera dead zone", DeadZoneColor), ("Boundary line", CategoryBoundaryLine));
+        }
+
+        // Where each zone reaches its required category (the union of every camera's area at that
+        // density) and where it falls short
+        private void DrawRequirementMap()
+        {
+            ClearMap();
+            Geometry rooms = Union(_data.Rooms.Select(ToGeometry));
+            var reached = new Dictionary<int, Geometry>();
+
+            foreach (AuditZone zone in _data.Zones)
+            {
+                if (!reached.TryGetValue(zone.Required.Index, out Geometry covered))
+                    reached[zone.Required.Index] = covered = Union(_sights.Select(s => ToGeometry(s.Outline(zone.Required.PixelsPerMeter))));
+
+                Geometry area = ToGeometry(zone.Loops);
+                Geometry meets = covered != null ? Geometry.Combine(area, covered, GeometryCombineMode.Intersect, null) : null;
+                AddFill(meets, Single);
+                AddFill(meets != null ? Geometry.Combine(area, meets, GeometryCombineMode.Exclude, null) : area, Uncovered);
+            }
+
+            foreach (CameraSight sight in _sights)
+                AddFill(ToGeometry(sight.DeadZone()), DeadZoneColor);
+
+            DrawOverlays(rooms);
+            foreach (AuditZone zone in _data.Zones)
+                AddLine(ToGeometry(zone.Loops), ((SolidColorBrush)FindResource("Text.Primary")).Color, 1.6);
+            ApplyZoomToOverlays();
+        }
+
+        private AuditZone ZoneAt(PlanPoint point) => _data.Zones.FirstOrDefault(z => Contains(z.Loops, point));
+
+        private void MeasureCategoryAreas()
+        {
+            int cells = _width * _height;
+            double cellArea = _cell * _cell * 0.09290304; // ft² → m²
+            double[] best = BestDensity();
 
             var areas = new double[CameraData.Categories.Count + 1]; // 0 = below Overview or not seen, otherwise index + 1
             double roomArea = 0;
@@ -374,7 +493,7 @@ namespace Camera_FOV.UI
 
             // Obstructions, as the coverage sees them
             foreach (List<PlanPoint> line in _data.BoundaryLines)
-                AddLine(ToPolyline(line), ShowingCategories ? CategoryBoundaryLine : BoundaryLine, 1.4);
+                AddLine(ToPolyline(line), UsesSights ? CategoryBoundaryLine : BoundaryLine, 1.4);
 
             foreach (AuditCamera camera in _data.Cameras.Where(c => c.Position.HasValue))
                 AddCamera(camera);
@@ -441,9 +560,9 @@ namespace Camera_FOV.UI
         {
             Point center = ToCanvas(camera.Position.Value);
 
-            // The category mode uses every camera it has values for; the other modes only up-to-date drawn coverage
+            // The sight-based modes use every camera they have values for; the other modes only up-to-date drawn coverage
             string fill, note;
-            if (ShowingCategories)
+            if (UsesSights)
             {
                 bool used = CategoryCoverage.CanSee(camera);
                 fill = used ? "Text.Primary" : "Status.Warning";
@@ -666,12 +785,14 @@ namespace Camera_FOV.UI
         // The highest density any included camera reaches at the spot, at the shown level
         private string DescribePinDensity(PlanPoint point)
         {
-            if (ShowingCategories)
+            if (UsesSights)
             {
                 var sees = SightsAt(point);
-                if (!sees.Any()) return "Not seen";
+                if (!sees.Any()) return ShowingRequirements && ZoneAt(point) is AuditZone unseen ? $"Not seen · needs {unseen.Required.Name}" : "Not seen";
                 ObservationCategory category = CameraData.CategoryFor(sees[0].Density);
-                return category != null ? $"{category.Name} · {sees[0].Density:0} px/m" : $"{sees[0].Density:0} px/m";
+                string label = category != null ? $"{category.Name} · {sees[0].Density:0} px/m" : $"{sees[0].Density:0} px/m";
+                AuditZone zone = ShowingRequirements ? ZoneAt(point) : null;
+                return zone == null ? label : $"{label} · {(sees[0].Density >= zone.Required.PixelsPerMeter ? "meets" : "below")} {zone.Required.Name}";
             }
 
             var hits = HitsAt(point);
@@ -725,16 +846,20 @@ namespace Camera_FOV.UI
         private void ShowCategoryPoint(PlanPoint point)
         {
             var sees = SightsAt(point);
+            AuditZone zone = ShowingRequirements ? ZoneAt(point) : null;
+            string zoneLine = zone == null ? string.Empty
+                : $"{zone.Name} needs {zone.Required.Name} ({zone.Required.PixelsPerMeter:0} px/m): " +
+                  (sees.Any() && sees[0].Density >= zone.Required.PixelsPerMeter ? "met here.\n" : "not met here.\n");
             if (!sees.Any())
             {
-                PointText.Text = $"No camera sees this spot at {CameraData.Categories[0].Name} ({CameraData.Categories[0].PixelsPerMeter:0} px/m) or better.";
+                PointText.Text = zoneLine + $"No camera sees this spot at {CameraData.Categories[0].Name} ({CameraData.Categories[0].PixelsPerMeter:0} px/m) or better.";
                 return;
             }
 
             var lines = sees.Select(s =>
             {
                 ObservationCategory category = CameraData.CategoryFor(s.Density);
-                return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Sight.SlantMeters(s.Meters):0.0} m"
+                return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Sight.SlantMeters(s.Meters):0.0} m."
                     + PointCoverage.MountNote(s.Sight.Camera.Mount, s.Meters, category != null && category.Index >= 5)
                     + (s.Sight.Camera.IntendedCategory is ObservationCategory intended
                         ? (s.Density >= intended.PixelsPerMeter ? $" Meets its intended {intended.Name} here." : $" Below its intended {intended.Name} here.")
@@ -742,12 +867,12 @@ namespace Camera_FOV.UI
             });
 
             string heading = sees.Count == 1 ? "1 camera sees this spot" : $"{sees.Count} cameras see this spot";
-            PointText.Text = heading + ":\n" + string.Join("\n", lines);
+            PointText.Text = zoneLine + heading + ":\n" + string.Join("\n", lines);
         }
 
         private void ShowPoint(PlanPoint point)
         {
-            if (ShowingCategories)
+            if (UsesSights)
             {
                 ShowCategoryPoint(point);
                 return;

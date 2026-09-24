@@ -39,6 +39,14 @@ namespace Camera_FOV.Services
         public List<List<PlanPoint>> Loops = new List<List<PlanPoint>>();
     }
 
+    /// <summary>A room or space that needs an observation category (issue #13).</summary>
+    public sealed class AuditZone
+    {
+        public string Name;
+        public ObservationCategory Required;
+        public List<List<PlanPoint>> Loops;
+    }
+
     /// <summary>Plain data for the coverage audit window, so the window never touches the Revit API.</summary>
     public sealed class AuditData
     {
@@ -50,6 +58,8 @@ namespace Camera_FOV.Services
         public int HiddenRegions;
         public int UntaggedDoriRegions;
         public int LinkedRoomSources;
+        public List<AuditZone> Zones = new List<AuditZone>();      // Rooms and spaces with a required category (issue #13)
+        public List<string> UnreadableZones = new List<string>();  // Their required category isn't one of the categories
     }
 
     /// <summary>
@@ -206,7 +216,17 @@ namespace Camera_FOV.Services
                     .Select(segments => Tessellate(segments.Select(s => s.GetCurve()), toHost))
                     .Where(loop => loop.Count >= 3)
                     .ToList();
-                if (loops.Any()) data.Rooms.Add(loops);
+                if (!loops.Any()) continue;
+                data.Rooms.Add(loops);
+
+                // A required observation category marks the room as a zone to check (issue #13)
+                string required = room.LookupParameter(SettingsManager.Settings.ParameterName_RequiredCategory ?? string.Empty)?.AsString();
+                if (string.IsNullOrWhiteSpace(required)) continue;
+
+                string name = string.Join(" ", new[] { room.Number, room.Name }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
+                ObservationCategory category = CameraPurpose.ParseCategory(required);
+                if (category == null) data.UnreadableZones.Add($"{name} (“{required.Trim()}”)");
+                else data.Zones.Add(new AuditZone { Name = name, Required = category, Loops = loops });
             }
         }
 

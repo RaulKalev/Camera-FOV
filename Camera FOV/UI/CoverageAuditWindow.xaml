@@ -51,13 +51,14 @@
                 <!--  Level selector and options  -->
                 <StackPanel Margin="16,0,16,10" DockPanel.Dock="Top">
                     <Border Style="{StaticResource Segmented}">
-                        <UniformGrid x:Name="LevelSelector" Columns="6">
+                        <UniformGrid x:Name="LevelSelector" Columns="7">
                             <RadioButton Checked="Level_Checked" Content="Detection" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="0" />
                             <RadioButton Checked="Level_Checked" Content="Observation" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="1" />
                             <RadioButton Checked="Level_Checked" Content="Recognition" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="2" />
                             <RadioButton Checked="Level_Checked" Content="Identification" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="3" />
                             <RadioButton Checked="Level_Checked" Content="Best level" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-1" />
                             <RadioButton Checked="Level_Checked" Content="IEC categories" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-2" ToolTip="Observation categories of IEC 62676-4:2026, worked out from the cameras and Boundary lines rather than from the drawn regions" />
+                            <RadioButton Checked="Level_Checked" Content="Requirements" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-3" ToolTip="Rooms and spaces with a required observation category: where it is met and where it falls short" />
                         </UniformGrid>
                     </Border>
                     <CheckBox
@@ -82,6 +83,27 @@
                             x:Name="SummaryText"
                             Style="{StaticResource Type.Body}"
                             TextWrapping="Wrap" />
+                        <!--  One line per room or space with a required category (issue #13)  -->
+                        <ScrollViewer
+                            x:Name="ZoneListScroll"
+                            MaxHeight="110"
+                            Margin="0,6,0,0"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto"
+                            Visibility="Collapsed">
+                            <ItemsControl x:Name="ZoneList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock
+                                            Margin="0,1"
+                                            Foreground="{Binding Brush}"
+                                            Style="{StaticResource Type.Secondary}"
+                                            Text="{Binding Text}"
+                                            TextWrapping="Wrap" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
                         <TextBlock
                             x:Name="SourcesText"
                             Margin="0,4,0,0"
