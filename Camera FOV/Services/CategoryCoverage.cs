@@ -13,18 +13,26 @@ namespace Camera_FOV.Services
     public sealed class CameraSight
     {
         public AuditCamera Camera { get; }
-        public double OverviewFeet { get; }
+        public double OverviewFeet { get; }  // Plan distance out to which anything is seen at Overview
+        public double NearFeet { get; }      // Plan distance of the dead zone's edge (issue #16); 0 without one
+        public double FarFeet { get; }       // Plan distance beyond which the target is above the view
 
         private readonly List<double> _angles = new List<double>(); // Degrees, plan
         private readonly List<double> _reach = new List<double>();  // Feet: to the first Boundary line, at most OverviewFeet
         private readonly bool _fullCircle;
         private readonly PixelDensityFormula _formula;
+        private readonly CameraMount _mount;
 
         internal CameraSight(AuditCamera camera, PixelDensityFormula formula, double stepDegrees, IReadOnlyList<Segment> boundaries)
         {
             Camera = camera;
             _formula = formula;
-            OverviewFeet = DistanceFeet(CameraData.Categories[0].PixelsPerMeter);
+            _mount = camera.Mount ?? new CameraMount();
+
+            var (nearMeters, farMeters) = _mount.VisibleRange();
+            NearFeet = double.IsPositiveInfinity(nearMeters) ? double.PositiveInfinity : nearMeters / 0.3048;
+            FarFeet = double.IsPositiveInfinity(farMeters) ? double.PositiveInfinity : farMeters / 0.3048;
+            OverviewFeet = Math.Min(DistanceFeet(CameraData.Categories[0].PixelsPerMeter), FarFeet);
 
             double cx = camera.Position.Value.X, cy = camera.Position.Value.Y;
             double fov = camera.FovDegrees.Value, aim = camera.AimDegrees.Value;
@@ -51,35 +59,83 @@ namespace Camera_FOV.Services
             }
         }
 
-        /// <summary>Horizontal pixels per metre at a distance in metres from the camera.</summary>
-        public double PixelsPerMeterAt(double meters)
+        /// <summary>
+        /// Horizontal pixels per metre at a plan distance in metres from the camera, measured at the
+        /// slant distance to the target; 0 in the dead zone and above the view.
+        /// </summary>
+        public double PixelsPerMeterAt(double planMeters)
         {
-            return CameraData.PixelsPerMeter(Camera.Resolution.Value, Camera.FovDegrees.Value, meters, _formula);
+            double feet = planMeters / 0.3048;
+            if (feet < NearFeet || feet > FarFeet) return 0;
+            return CameraData.PixelsPerMeter(Camera.Resolution.Value, Camera.FovDegrees.Value, _mount.SlantMeters(planMeters), _formula);
         }
 
-        /// <summary>The distance in feet at which the density falls to pixelsPerMeter.</summary>
+        /// <summary>The slant distance from the lens, in metres, at a plan distance.</summary>
+        public double SlantMeters(double planMeters) => _mount.SlantMeters(planMeters);
+
+        /// <summary>The plan distance in feet at which the density falls to pixelsPerMeter; 0 when the target is never that close.</summary>
         public double DistanceFeet(double pixelsPerMeter)
         {
-            return CameraData.DistanceMeters(Camera.Resolution.Value, Camera.FovDegrees.Value, pixelsPerMeter, _formula) / 0.3048;
+            double slant = CameraData.DistanceMeters(Camera.Resolution.Value, Camera.FovDegrees.Value, pixelsPerMeter, _formula);
+            return (_mount.PlanForSlant(slant) ?? 0) / 0.3048;
         }
 
         /// <summary>
-        /// The area seen at pixelsPerMeter or better, as a closed outline: the camera, then every ray's
-        /// end, each stopped by a Boundary line or at that density's distance. A 360° view has no apex.
+        /// The area seen at pixelsPerMeter or better, as closed loops (even-odd): every ray's end, each
+        /// stopped by a Boundary line or at that density's distance, back along the edge of the dead zone
+        /// (or through the camera). A 360° view is a ring: an outer loop and the dead zone as a hole.
+        /// Empty when that density isn't reached outside the dead zone.
         /// </summary>
-        public List<PlanPoint> Outline(double pixelsPerMeter)
+        public List<List<PlanPoint>> Outline(double pixelsPerMeter)
         {
             double limit = Math.Min(OverviewFeet, DistanceFeet(pixelsPerMeter));
-            PlanPoint c = Camera.Position.Value;
+            var loops = new List<List<PlanPoint>>();
+            if (limit <= NearFeet || limit <= 0) return loops;
 
+            PlanPoint c = Camera.Position.Value;
+            PlanPoint At(int i, double r)
+            {
+                double rad = _angles[i] * Math.PI / 180.0;
+                return new PlanPoint(c.X + Math.Cos(rad) * r, c.Y + Math.Sin(rad) * r);
+            }
+
+            var outer = new List<PlanPoint>(_angles.Count * 2 + 1);
+            for (int i = 0; i < _angles.Count; i++)
+                outer.Add(At(i, Math.Max(Math.Min(_reach[i], limit), Math.Min(NearFeet, _reach[i]))));
+
+            if (_fullCircle)
+            {
+                loops.Add(outer);
+                if (NearFeet > 0)
+                    loops.Add(Enumerable.Range(0, _angles.Count).Select(i => At(i, Math.Min(NearFeet, _reach[i]))).ToList());
+            }
+            else
+            {
+                if (NearFeet > 0)
+                    for (int i = _angles.Count - 1; i >= 0; i--) outer.Add(At(i, Math.Min(NearFeet, _reach[i])));
+                else
+                    outer.Insert(0, c);
+                loops.Add(outer);
+            }
+            return loops;
+        }
+
+        /// <summary>The dead zone below the camera (issue #16), as loops; empty when it has none or it isn't known.</summary>
+        public List<List<PlanPoint>> DeadZone()
+        {
+            var loops = new List<List<PlanPoint>>();
+            if (NearFeet <= 0 || double.IsPositiveInfinity(NearFeet)) return loops;
+
+            PlanPoint c = Camera.Position.Value;
             var points = new List<PlanPoint>(_angles.Count + 1);
             if (!_fullCircle) points.Add(c);
             for (int i = 0; i < _angles.Count; i++)
             {
-                double rad = _angles[i] * Math.PI / 180.0, r = Math.Min(_reach[i], limit);
+                double rad = _angles[i] * Math.PI / 180.0, r = Math.Min(NearFeet, _reach[i]);
                 points.Add(new PlanPoint(c.X + Math.Cos(rad) * r, c.Y + Math.Sin(rad) * r));
             }
-            return points;
+            loops.Add(points);
+            return loops;
         }
     }
 

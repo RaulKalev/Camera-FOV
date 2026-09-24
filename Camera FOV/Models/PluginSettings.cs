@@ -39,6 +39,27 @@ namespace Camera_FOV.Models
         [JsonConverter(typeof(StringEnumConverter))]
         public PixelDensityFormula PixelDensityFormula { get; set; } = PixelDensityFormula.Standard;
 
+        // Camera height and tilt (issue #16). The mounting height comes from the named instance
+        // parameter, or, when empty, from the camera's height above its level. Tilt is degrees
+        // below horizontal. The target is what is looked at, e.g. a face at 1.6 m.
+        public bool UseMountingGeometry { get; set; } = true;
+        public string ParameterName_MountingHeight { get; set; } = string.Empty;
+        public string ParameterName_Tilt { get; set; } = "Tilt Angle";
+        public double TargetHeightMeters { get; set; } = 1.6;
+        public double MaxFaceViewAngleDegrees { get; set; } = 30.0;
+
+        // What each camera is for (issue #14) and what each room needs (issue #13): text parameters
+        public string ParameterName_IntendedCategory { get; set; } = "Observation category";
+        public string ParameterName_RiskGrade { get; set; } = "Risk grade";
+        public string ParameterName_RequiredCategory { get; set; } = "Required category";
+
+        // Moving objects crossing a view (issue #18)
+        public string ParameterName_FrameRate { get; set; } = "Frame rate";
+        public double WalkingSpeedKmh { get; set; } = 5.0;
+        public double RunningSpeedKmh { get; set; } = 15.0;
+        public double VehicleSpeedKmh { get; set; } = 50.0;
+        public int MinFramesPerCrossing { get; set; } = 1;
+
         // Folder of the shared camera type library (a network drive or synced folder). Empty keeps the
         // library on this PC only.
         public string CameraTypesFolder { get; set; } = string.Empty;

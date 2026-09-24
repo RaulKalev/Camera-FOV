@@ -26,6 +26,7 @@ namespace Camera_FOV.Services
         public int? Resolution;
         public double? FovDegrees;
         public double? AimDegrees; // Plan direction the camera faces, in degrees
+        public CameraMount Mount;  // Height and tilt (issue #16)
         public CoverageState State;
     }
 
@@ -169,6 +170,7 @@ namespace Camera_FOV.Services
             auditCamera.FovDegrees = values.FovDegrees;
             auditCamera.Resolution = values.Resolution;
             auditCamera.AimDegrees = values.AimDegrees;
+            auditCamera.Mount = values.Mount;
         }
 
         // Rooms and MEP spaces whose height range contains the plan's cut plane, with their boundaries

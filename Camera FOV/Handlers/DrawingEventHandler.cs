@@ -1834,7 +1834,9 @@ namespace Camera_FOV.Handlers
             : $"None of the {results.Count} cameras in this view reaches Detection density here.";
         if (others.Count > maxOthers)
             message += $" {others.Count - maxOthers} more distant cameras aren’t listed.";
-        message += " Plan-view check: camera height and tilt are not modelled.";
+        message += SettingsManager.Settings.UseMountingGeometry
+            ? $" Camera height and tilt are included, for a target {SettingsManager.Settings.TargetHeightMeters:0.0#} m above the floor."
+            : " Plan-view check: camera height and tilt are switched off in Settings.";
 
         MessageDialog.Show(covering.Any() ? MessageDialog.Kind.Info : MessageDialog.Kind.Warning, heading, message, items);
     }

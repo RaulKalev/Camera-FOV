@@ -37,7 +37,7 @@ namespace Camera_FOV.UI
         private const int CategoryMode = -2;
         private bool ShowingCategories => _level == CategoryMode;
         private List<CameraSight> _sights;
-        private List<List<PlanPoint>> _sightOutlines; // Each sight's Overview outline
+        private List<List<List<PlanPoint>>> _sightOutlines; // Each sight's Overview outline, as loops
         private List<AuditCamera> _skipped;
         private PixelDensityFormula _sightFormula;
 
@@ -46,6 +46,7 @@ namespace Camera_FOV.UI
         private static readonly Color Overlap = Color.FromRgb(0x3E, 0x8E, 0xF7);
         private static readonly Color BoundaryLine = Color.FromRgb(0x2E, 0xD1, 0x5E);
         private static readonly Color CategoryBoundaryLine = Color.FromRgb(0xFF, 0x4F, 0xD8); // Stands out from the green category ramp
+        private static readonly Color DeadZoneColor = Color.FromRgb(0x5A, 0x5A, 0x66);
         private static readonly Color[] LevelColors =
         {
             Color.FromRgb(0xF2, 0x8B, 0x82), Color.FromRgb(0xFD, 0xD6, 0x63),
@@ -157,7 +158,7 @@ namespace Camera_FOV.UI
             // The category mode is worked out from the cameras themselves, so drawn coverage being out of date doesn't matter
             IncludeOutdatedCheckBox.IsEnabled = !ShowingCategories;
             BasisText.Text = ShowingCategories
-                ? "Worked out in plan from each camera’s position, direction, field of view and resolution: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed."
+                ? "Worked out from each camera’s position, direction, field of view, resolution, height and tilt: density is measured to the target height, and the dead zone under each camera is left out. Anything not drawn as a Boundary line isn’t modelled. Nothing in the model is changed."
                 : "Based on the drawn coverage in plan: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed.";
 
             if (ShowingCategories)
@@ -257,7 +258,7 @@ namespace Camera_FOV.UI
             {
                 CameraSight sight = _sights[s];
                 PlanPoint camera = sight.Camera.Position.Value;
-                Fill(new List<List<PlanPoint>> { _sightOutlines[s] }, index =>
+                Fill(_sightOutlines[s], index =>
                 {
                     PlanPoint centre = CellCentre(index);
                     double dx = centre.X - camera.X, dy = centre.Y - camera.Y;
@@ -289,7 +290,7 @@ namespace Camera_FOV.UI
             }
 
             SetLegend(CameraData.Categories.Reverse().Select(c => ($"{c.Name} {c.PixelsPerMeter:0} px/m", CategoryColors[c.Index]))
-                .Concat(new[] { ("Uncovered (in rooms)", Uncovered), ("Boundary line", CategoryBoundaryLine) }).ToArray());
+                .Concat(new[] { ("Uncovered (in rooms)", Uncovered), ("Camera dead zone", DeadZoneColor), ("Boundary line", CategoryBoundaryLine) }).ToArray());
         }
 
         private PlanPoint CellCentre(int index)
@@ -393,12 +394,16 @@ namespace Camera_FOV.UI
             foreach (ObservationCategory category in CameraData.Categories)
             {
                 foreach (CameraSight sight in _sights)
-                    AddFill(ToGeometry(new List<List<PlanPoint>> { sight.Outline(category.PixelsPerMeter) }), CategoryColors[category.Index], map);
+                    AddFill(ToGeometry(sight.Outline(category.PixelsPerMeter)), CategoryColors[category.Index], map);
             }
 
-            List<Geometry> seen = _sightOutlines.Select(o => ToGeometry(new List<List<PlanPoint>> { o })).ToList();
+            List<Geometry> seen = _sightOutlines.Select(ToGeometry).ToList();
             Geometry covered = Union(seen);
             if (rooms != null) AddFill(covered != null ? Geometry.Combine(rooms, covered, GeometryCombineMode.Exclude, null) : rooms, Uncovered);
+
+            // Under and in front of each camera, where its view doesn't reach the target height (issue #16)
+            foreach (CameraSight sight in _sights)
+                AddFill(ToGeometry(sight.DeadZone()), DeadZoneColor, map);
 
             foreach (Geometry outline in seen)
             {
@@ -698,7 +703,7 @@ namespace Camera_FOV.UI
 
             double dx = point.X - camera.Position.Value.X, dy = point.Y - camera.Position.Value.Y;
             double meters = Math.Sqrt(dx * dx + dy * dy) * 0.3048;
-            return CameraData.PixelsPerMeter(camera.Resolution.Value, camera.FovDegrees.Value, meters);
+            return CameraData.PixelsPerMeter(camera.Resolution.Value, camera.FovDegrees.Value, camera.Mount?.SlantMeters(meters) ?? meters);
         }
 
         // The cameras that see the spot, best density first: inside the area seen at Overview or better
@@ -707,7 +712,7 @@ namespace Camera_FOV.UI
             var result = new List<(CameraSight, double, double)>();
             for (int s = 0; s < _sights.Count; s++)
             {
-                if (!Contains(new List<List<PlanPoint>> { _sightOutlines[s] }, point)) continue;
+                if (!Contains(_sightOutlines[s], point)) continue;
 
                 PlanPoint camera = _sights[s].Camera.Position.Value;
                 double dx = point.X - camera.X, dy = point.Y - camera.Y;
@@ -729,7 +734,8 @@ namespace Camera_FOV.UI
             var lines = sees.Select(s =>
             {
                 ObservationCategory category = CameraData.CategoryFor(s.Density);
-                return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Meters:0.0} m";
+                return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Sight.SlantMeters(s.Meters):0.0} m"
+                    + PointCoverage.MountNote(s.Sight.Camera.Mount, s.Meters, category != null && category.Index >= 5);
             });
 
             string heading = sees.Count == 1 ? "1 camera sees this spot" : $"{sees.Count} cameras see this spot";

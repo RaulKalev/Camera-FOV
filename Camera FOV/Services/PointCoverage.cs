@@ -12,6 +12,8 @@ namespace Camera_FOV.Services
         TooFar,      // Visible, but below Detection density
         OutsideFov,  // The point is outside the camera's field of view
         Blocked,     // A Boundary line lies between the camera and the point
+        DeadZone,    // Too close under the camera: below the bottom edge of its view (issue #16)
+        AboveView,   // Too far for a tilted camera: above the top edge of its view (issue #16)
         Unknown      // Missing camera data: never reported as covered
     }
 
@@ -20,7 +22,9 @@ namespace Camera_FOV.Services
         public Element Camera { get; set; }
         public PointVerdict Verdict { get; set; }
         public string Reason { get; set; }
-        public double DistanceMeters { get; set; }
+        public double DistanceMeters { get; set; }  // In plan
+        public double SlantMeters { get; set; }     // From the lens to the target height
+        public CameraMount Mount { get; set; }
         public double PixelsPerMeter { get; set; }
         public DoriLevel Level { get; set; }
         public CoverageState CoverageState { get; set; }
@@ -29,7 +33,8 @@ namespace Camera_FOV.Services
     /// <summary>
     /// Which cameras see a point in plan, and how well (issue #7). Read-only. Uses the same 2D model as
     /// the drawn coverage: the field of view as a wedge, the plugin's pixel-density formula, and
-    /// Boundary lines as the only obstructions. Camera height, tilt and lens distortion are not modelled.
+    /// Boundary lines as the only obstructions. Camera height and tilt (issue #16) add the slant distance
+    /// and the dead zone; lens distortion is not modelled.
     /// </summary>
     public static class PointCoverage
     {
@@ -100,19 +105,62 @@ namespace Camera_FOV.Services
                 return result;
             }
 
-            result.PixelsPerMeter = CameraData.PixelsPerMeter(resolution, fov, result.DistanceMeters);
+            // Height and tilt (issue #16): the vertical view, then density at the slant distance
+            CameraMount mount = values.Mount;
+            result.Mount = mount;
+            var (near, far) = mount.VisibleRange();
+            if (result.DistanceMeters < near)
+            {
+                result.Verdict = PointVerdict.DeadZone;
+                result.Reason = double.IsPositiveInfinity(near)
+                    ? $"Its view never reaches the target height ({mount.Describe()})."
+                    : $"In the camera’s dead zone: its view reaches the target height only {near:0.0} m from the camera; this point is {result.DistanceMeters:0.0} m away ({mount.Describe()}).";
+                return result;
+            }
+            if (result.DistanceMeters > far)
+            {
+                result.Verdict = PointVerdict.AboveView;
+                result.Reason = $"Above the top of its view: a camera {mount.Describe()} sees the target height only up to {far:0.0} m; this point is {result.DistanceMeters:0.0} m away.";
+                return result;
+            }
+
+            result.SlantMeters = mount.SlantMeters(result.DistanceMeters);
+            result.PixelsPerMeter = CameraData.PixelsPerMeter(resolution, fov, result.SlantMeters);
             result.Level = CameraData.LevelFor(result.PixelsPerMeter);
+            string at = Math.Abs(result.SlantMeters - result.DistanceMeters) > 0.05
+                ? $"{result.SlantMeters:0.0} m from the lens ({result.DistanceMeters:0.0} m in plan)"
+                : $"{result.DistanceMeters:0.0} m";
 
             if (result.Level == null)
             {
                 result.Verdict = PointVerdict.TooFar;
-                result.Reason = $"Too far: {result.PixelsPerMeter:0} px/m at {result.DistanceMeters:0.0} m; Detection needs {CameraData.Levels[0].PixelsPerMeter:0} px/m.";
+                result.Reason = $"Too far: {result.PixelsPerMeter:0} px/m at {at}; Detection needs {CameraData.Levels[0].PixelsPerMeter:0} px/m.";
                 return result;
             }
 
             result.Verdict = PointVerdict.Covered;
-            result.Reason = $"{result.Level.Name}: {result.PixelsPerMeter:0} px/m at {result.DistanceMeters:0.0} m ({resolution} px, {fov:0}°).";
+            result.Reason = $"{result.Level.Name}: {result.PixelsPerMeter:0} px/m at {at} ({resolution} px, {fov:0}°).";
+            result.Reason += MountNote(mount, result.DistanceMeters, result.Level.Index == CameraData.Levels.Count - 1);
             return result;
+        }
+
+        /// <summary>
+        /// What the reader should know about the vertical view: unknown height or tilt, and a view too
+        /// steep for recognising faces (issue #16, EVS-EN IEC 62676-4:2026, 6.8).
+        /// </summary>
+        public static string MountNote(CameraMount mount, double planMeters, bool faceLevel)
+        {
+            if (mount == null || !mount.Enabled) return string.Empty;
+
+            string note = string.Empty;
+            double? down = mount.DepressionDegrees(planMeters);
+            if (faceLevel && down.HasValue && down.Value > SettingsManager.Settings.MaxFaceViewAngleDegrees)
+                note += $" Looks down at {down:0}°, steeper than {SettingsManager.Settings.MaxFaceViewAngleDegrees:0}°: too steep to see a face fully.";
+            if (!mount.HeightMeters.HasValue)
+                note += " Height unknown, so the plan distance is used.";
+            else if (!mount.TiltDegrees.HasValue)
+                note += " Tilt unknown, so the dead zone isn’t checked.";
+            return note;
         }
 
         public sealed class CameraValues
@@ -120,6 +168,7 @@ namespace Camera_FOV.Services
             public double? AimDegrees;
             public double? FovDegrees;
             public int? Resolution;
+            public CameraMount Mount;
         }
 
         /// <summary>
@@ -155,6 +204,7 @@ namespace Camera_FOV.Services
             }
 
             if (values.AimDegrees == null) values.AimDegrees = CameraSymbol.GetAngleDegrees(camera, view);
+            values.Mount = CameraMount.Read(camera, values.FovDegrees);
 
             return values;
         }

@@ -37,6 +37,72 @@ namespace Camera_FOV
             LoadDimensionSettings();
             LoadTracingRules();
             LoadFormula();
+            LoadCameraUseSettings();
+        }
+
+        // Height and tilt (issue #16), purpose (#14), rooms (#13) and moving objects (#18)
+        private void LoadCameraUseSettings()
+        {
+            var s = SettingsManager.Settings;
+            ParamMountingHeight.Text = s.ParameterName_MountingHeight;
+            ParamTilt.Text = s.ParameterName_Tilt;
+            ParamIntendedCategory.Text = s.ParameterName_IntendedCategory;
+            ParamRiskGrade.Text = s.ParameterName_RiskGrade;
+            ParamFrameRate.Text = s.ParameterName_FrameRate;
+            ParamRequiredCategory.Text = s.ParameterName_RequiredCategory;
+            UseMountingCheckBox.IsChecked = s.UseMountingGeometry;
+            TargetHeightBox.Text = s.TargetHeightMeters.ToString("0.##", CultureInfo.InvariantCulture);
+            MaxFaceAngleBox.Text = s.MaxFaceViewAngleDegrees.ToString("0.#", CultureInfo.InvariantCulture);
+            WalkingBox.Text = s.WalkingSpeedKmh.ToString("0.#", CultureInfo.InvariantCulture);
+            RunningBox.Text = s.RunningSpeedKmh.ToString("0.#", CultureInfo.InvariantCulture);
+            VehicleBox.Text = s.VehicleSpeedKmh.ToString("0.#", CultureInfo.InvariantCulture);
+            MinFramesBox.Text = s.MinFramesPerCrossing.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParseNumber(string text, double min, double max, out double value)
+        {
+            text = text?.Trim();
+            bool parsed = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+                || double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value);
+            return parsed && value >= min && value <= max;
+        }
+
+        // Reads them back; returns the problems, or nothing when all can be saved
+        private List<MessageDialog.Item> ReadCameraUseSettings(out Action apply)
+        {
+            var problems = new List<MessageDialog.Item>();
+            if (!TryParseNumber(TargetHeightBox.Text, 0, 20, out double target))
+                problems.Add(new MessageDialog.Item("Target height", "Enter the height in metres, from 0 to 20 (for example 1.6)."));
+            if (!TryParseNumber(MaxFaceAngleBox.Text, 1, 90, out double face))
+                problems.Add(new MessageDialog.Item("Steepest view for faces", "Enter an angle in degrees, from 1 to 90 (for example 30)."));
+            if (!TryParseNumber(WalkingBox.Text, 0.1, 500, out double walking) ||
+                !TryParseNumber(RunningBox.Text, 0.1, 500, out double running) ||
+                !TryParseNumber(VehicleBox.Text, 0.1, 500, out double vehicle))
+            {
+                problems.Add(new MessageDialog.Item("Moving objects", "Enter each speed in km/h, above 0."));
+                walking = running = vehicle = 0;
+            }
+            if (!TryParseNumber(MinFramesBox.Text, 1, 1000, out double frames) || frames != Math.Floor(frames))
+                problems.Add(new MessageDialog.Item("Frames needed per crossing", "Enter a whole number of frames, 1 or more."));
+
+            apply = () =>
+            {
+                var s = SettingsManager.Settings;
+                s.ParameterName_MountingHeight = ParamMountingHeight.Text.Trim();
+                s.ParameterName_Tilt = ParamTilt.Text.Trim();
+                s.ParameterName_IntendedCategory = ParamIntendedCategory.Text.Trim();
+                s.ParameterName_RiskGrade = ParamRiskGrade.Text.Trim();
+                s.ParameterName_FrameRate = ParamFrameRate.Text.Trim();
+                s.ParameterName_RequiredCategory = ParamRequiredCategory.Text.Trim();
+                s.UseMountingGeometry = UseMountingCheckBox.IsChecked == true;
+                s.TargetHeightMeters = target;
+                s.MaxFaceViewAngleDegrees = face;
+                s.WalkingSpeedKmh = walking;
+                s.RunningSpeedKmh = running;
+                s.VehicleSpeedKmh = vehicle;
+                s.MinFramesPerCrossing = (int)frames;
+            };
+            return problems;
         }
 
         private static readonly PixelDensityFormula[] Formulas = { PixelDensityFormula.Standard, PixelDensityFormula.Legacy };
@@ -169,6 +235,14 @@ namespace Camera_FOV
                     owner: this);
                 return;
             }
+
+            List<MessageDialog.Item> problems = ReadCameraUseSettings(out Action applyCameraUse);
+            if (problems.Any())
+            {
+                MessageDialog.ShowWarning("Some settings aren’t valid", "Fix these and save again.", problems, owner: this);
+                return;
+            }
+            applyCameraUse();
 
             string dimensionType = DimensionTypeComboBox.SelectedItem as string;
             SettingsManager.Settings.FovDimensionTypeName = dimensionType == null || dimensionType == NoDimension ? string.Empty : dimensionType;

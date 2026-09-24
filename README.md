@@ -66,7 +66,7 @@ The camera icon in the main window opens **Camera types**, a library of the came
 
 ## Good to know
 
-- Everything is calculated on the floor plan. Camera height and tilt aren't taken into account yet.
+- The point check and the audit's IEC categories account for camera height and tilt: density is measured from the lens to the target height (Settings → Camera height and tilt), and the dead zone under a tilted camera doesn't count as covered. The drawn DORI regions stay plan-based.
 - The plugin only changes what it drew itself. Filled regions and boundary lines you drew by hand are kept.
 - Pixel density and DORI distances follow EVS-EN IEC 62676-4:2026 (Figure 4): horizontal pixels over the flat scene width, 2 × distance × tan(FOV / 2). The earlier formula, which matches Axis Site Designer and gives longer distances for wide lenses, can be chosen in Settings. Coverage drawn with the other formula is shown as out of date.
 - Works in **Revit 2024** and **Revit 2026**.

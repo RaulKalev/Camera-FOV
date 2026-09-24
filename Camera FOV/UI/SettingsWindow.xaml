@@ -62,6 +62,7 @@
                     </StackPanel>
                 </Border>
 
+                <ScrollViewer MaxHeight="760" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <StackPanel x:Name="ContentRoot" Margin="16,0,16,16">
 
                     <!--  ============ Project setup ============  -->
@@ -331,9 +332,197 @@
                                 x:Name="ParamResolution"
                                 AutomationProperties.Name="Resolution parameter name"
                                 Style="{StaticResource Input.Text}" />
+                            <DockPanel Margin="0,12,0,6">
+                                <TextBlock
+                                    DockPanel.Dock="Right"
+                                    Style="{StaticResource Type.Caption}"
+                                    Text="Instance · Length" />
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Mounting height" />
+                            </DockPanel>
+                            <TextBox
+                                x:Name="ParamMountingHeight"
+                                AutomationProperties.Name="Mounting height parameter name"
+                                Style="{StaticResource Input.Text}"
+                                ToolTip="Leave empty to use the camera’s height above its level" />
+
+                            <DockPanel Margin="0,12,0,6">
+                                <TextBlock
+                                    DockPanel.Dock="Right"
+                                    Style="{StaticResource Type.Caption}"
+                                    Text="Instance or type · Angle" />
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Tilt (down from horizontal)" />
+                            </DockPanel>
+                            <TextBox
+                                x:Name="ParamTilt"
+                                AutomationProperties.Name="Tilt parameter name"
+                                Style="{StaticResource Input.Text}" />
+
+                            <DockPanel Margin="0,12,0,6">
+                                <TextBlock
+                                    DockPanel.Dock="Right"
+                                    Style="{StaticResource Type.Caption}"
+                                    Text="Instance · Text" />
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Intended observation category" />
+                            </DockPanel>
+                            <TextBox
+                                x:Name="ParamIntendedCategory"
+                                AutomationProperties.Name="Intended observation category parameter name"
+                                Style="{StaticResource Input.Text}" />
+
+                            <DockPanel Margin="0,12,0,6">
+                                <TextBlock
+                                    DockPanel.Dock="Right"
+                                    Style="{StaticResource Type.Caption}"
+                                    Text="Instance · Text" />
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Risk grade" />
+                            </DockPanel>
+                            <TextBox
+                                x:Name="ParamRiskGrade"
+                                AutomationProperties.Name="Risk grade parameter name"
+                                Style="{StaticResource Input.Text}" />
+
+                            <DockPanel Margin="0,12,0,6">
+                                <TextBlock
+                                    DockPanel.Dock="Right"
+                                    Style="{StaticResource Type.Caption}"
+                                    Text="Instance or type · Number" />
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Frame rate" />
+                            </DockPanel>
+                            <TextBox
+                                x:Name="ParamFrameRate"
+                                AutomationProperties.Name="Frame rate parameter name"
+                                Style="{StaticResource Input.Text}" />
+
+                            <DockPanel Margin="0,12,0,6">
+                                <TextBlock
+                                    DockPanel.Dock="Right"
+                                    Style="{StaticResource Type.Caption}"
+                                    Text="Room or space · Text" />
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Required category" />
+                            </DockPanel>
+                            <TextBox
+                                x:Name="ParamRequiredCategory"
+                                AutomationProperties.Name="Required category parameter name"
+                                Style="{StaticResource Input.Text}"
+                                ToolTip="On rooms and spaces: the observation category the area needs, e.g. Validate" />
                         </StackPanel>
                     </Border>
+
+                    <!--  ============ Camera height and tilt (issue #16) ============  -->
+                    <TextBlock Style="{StaticResource Type.Group}" Text="Camera height and tilt" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource CardRow}">
+                                <CheckBox
+                                    x:Name="UseMountingCheckBox"
+                                    AutomationProperties.Name="Account for camera height and tilt"
+                                    Style="{StaticResource Input.Check}">
+                                    <TextBlock Style="{StaticResource Type.Body}" Text="Account for camera height and tilt" />
+                                </CheckBox>
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Target height" />
+                                <TextBox
+                                    x:Name="TargetHeightBox"
+                                    Grid.Column="1"
+                                    MinWidth="72"
+                                    AutomationProperties.Name="Target height in metres"
+                                    Style="{StaticResource Input.Value}"
+                                    ToolTip="Height of what the camera must see, e.g. a face at 1.6 m or a number plate at 0.5 m" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Style="{StaticResource Type.Unit}"
+                                    Text="m" />
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Steepest view for faces" />
+                                <TextBox
+                                    x:Name="MaxFaceAngleBox"
+                                    Grid.Column="1"
+                                    MinWidth="72"
+                                    AutomationProperties.Name="Steepest downward view for faces in degrees"
+                                    Style="{StaticResource Input.Value}"
+                                    ToolTip="A warning is shown when a camera looks down more steeply than this at Identification, Validate or Scrutinise" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Style="{StaticResource Type.Unit}"
+                                    Text="°" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        Margin="12,6,12,0"
+                        Style="{StaticResource Type.Caption}"
+                        Text="Density is measured from the lens to the target height, and the dead zone under a tilted camera isn’t counted as covered. The drawn DORI regions stay plan-based."
+                        TextWrapping="Wrap" />
+
+                    <!--  ============ Moving objects (issue #18) ============  -->
+                    <TextBlock Style="{StaticResource Type.Group}" Text="Moving objects" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Walking" />
+                                <TextBox x:Name="WalkingBox" Grid.Column="1" MinWidth="72" AutomationProperties.Name="Walking speed in km/h" Style="{StaticResource Input.Value}" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Type.Unit}" Text="km/h" />
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Running" />
+                                <TextBox x:Name="RunningBox" Grid.Column="1" MinWidth="72" AutomationProperties.Name="Running speed in km/h" Style="{StaticResource Input.Value}" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Type.Unit}" Text="km/h" />
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Vehicle" />
+                                <TextBox x:Name="VehicleBox" Grid.Column="1" MinWidth="72" AutomationProperties.Name="Vehicle speed in km/h" Style="{StaticResource Input.Value}" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Type.Unit}" Text="km/h" />
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Frames needed per crossing" />
+                                <TextBox x:Name="MinFramesBox" Grid.Column="1" MinWidth="72" AutomationProperties.Name="Frames needed while an object crosses the view" Style="{StaticResource Input.Value}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        Margin="12,6,12,0"
+                        Style="{StaticResource Type.Caption}"
+                        Text="Used to count the frames a person or vehicle gets while crossing a camera’s view (IEC 62676-4:2026, 9.2 and Annex D)."
+                        TextWrapping="Wrap" />
                 </StackPanel>
+                </ScrollViewer>
             </DockPanel>
         </Border>
     </Grid>
