@@ -36,7 +36,9 @@ namespace Camera_FOV.Handlers
         UpdateCameraParameter,
         CreateBoundaryLine,
         CreateFilledRegions,
-        TraceWallsAndDrawBoundary
+        TraceWallsAndDrawBoundary,
+        CheckCoverage,
+        CheckViewCoverage
     }
 
     // Requests wait here in the order the user made them until Revit runs the external event.
@@ -61,6 +63,7 @@ namespace Camera_FOV.Handlers
     private List<ElementId> _lastBatchCreatedIds = new List<ElementId>(); // Undo batch tracker
     private bool _drawAngularDimension;
     private IReadOnlyList<DoriLayerConfig> _doriLayers;
+    private string _cameraStateAtSelection;
 
     // Must be constructed in a Revit API context (e.g. while an external command runs).
     public DrawingEventHandler()
@@ -86,7 +89,7 @@ namespace Camera_FOV.Handlers
                 return false;
             }
 
-            if (request.IsPreview && _pending.Count > 0 && _pending[_pending.Count - 1].IsPreview)
+            if (request.IsCoalescable && _pending.Count > 0 && _pending[_pending.Count - 1].Action == request.Action)
                 _pending[_pending.Count - 1] = request;
             else
                 _pending.Add(request);
@@ -102,7 +105,7 @@ namespace Camera_FOV.Handlers
         lock (_queueLock)
         {
             if (_closed) return;
-            _pending.RemoveAll(r => r.IsPreview);
+            _pending.RemoveAll(r => r.IsCoalescable);
             _pending.Add(cleanup);
             _closed = true;
         }
@@ -184,6 +187,7 @@ namespace Camera_FOV.Handlers
         _parameterValue = request.UserRotation;
         _doriLayers = request.DoriLayers;
         _drawAngularDimension = request.DrawAngularDimension;
+        _cameraStateAtSelection = request.CameraStateAtSelection;
     }
 
     private void Run(UIApplication app, DrawingRequest request)
@@ -191,7 +195,7 @@ namespace Camera_FOV.Handlers
         string rejection = Validate(request, app);
         if (rejection != null)
         {
-            if (request.IsPreview || request.Action == DrawingAction.Delete)
+            if (request.IsSilent)
                 System.Diagnostics.Debug.WriteLine($"Skipped {request.Action}: {rejection}");
             else
                 MessageDialog.ShowWarning(
@@ -237,6 +241,7 @@ namespace Camera_FOV.Handlers
                     if (_lastBatchCreatedIds != null && _lastBatchCreatedIds.Any())
                     {
                         UndoLastCoverage();
+                        ReportCameraCoverage();
                     }
                     else
                     {
@@ -256,6 +261,14 @@ namespace Camera_FOV.Handlers
 
                 case DrawingAction.TraceWallsAndDrawBoundary:
                     TraceWallsAndDrawBoundary();
+                    break;
+
+                case DrawingAction.CheckCoverage:
+                    ReportCameraCoverage();
+                    break;
+
+                case DrawingAction.CheckViewCoverage:
+                    CheckViewCoverage();
                     break;
 
                 default:
@@ -1397,12 +1410,30 @@ namespace Camera_FOV.Handlers
                 group.Start();
 
                 if (_cameraElement != null)
+                {
                     UpdateCameraParameter();
+                    AlignCameraSymbol(doc, view);
+                }
+
+                // What this coverage is drawn from, stored on every region so a later check can tell
+                // whether it still matches the camera (issue #9). Captured after the parameter write.
+                double reach = layers.Max(l => l.Distance) / 0.3048;
+                string cameraState = _cameraElement != null
+                    ? CoverageSource.MergeDrawnState(_cameraStateAtSelection, CoverageSource.CaptureCameraState(_cameraElement))
+                    : null;
+                string boundaryState = _cameraElement != null
+                    ? CoverageSource.CaptureBoundaryState(doc, view, _position, reach)
+                    : null;
 
                 foreach (DoriLayerConfig layer in layers)
                 {
                     bool carriesDimension = layer == smallestLayer && IsFovDimensionEnabled && _fovAngle < 180;
-                    ElementId id = DrawLayer(layer.Distance, layer.TypeId, carriesDimension ? FovDimensionLegLengthMm / 304.8 : 0);
+                    ElementId id = DrawLayer(layer.Distance, layer.TypeId, carriesDimension ? FovDimensionLegLengthMm / 304.8 : 0,
+                        region =>
+                        {
+                            if (cameraState != null)
+                                ElementTagStorage.TagCoverageSource(region, cameraState, boundaryState, reach);
+                        });
                     if (id == ElementId.InvalidElementId)
                     {
                         group.RollBack();
@@ -1456,6 +1487,7 @@ namespace Camera_FOV.Handlers
         }
 
         _lastBatchCreatedIds = created;
+        ReportCameraCoverage();
 
         if (dimensionFailure != null)
         {
@@ -1583,15 +1615,157 @@ namespace Camera_FOV.Handlers
 
     // Creates one tagged region in its own transaction; the caller decides what to replace.
     // apexLegLength > 0 splits that length off each wedge side at the camera (see FovDimensionLegLengthMm).
-    private ElementId DrawLayer(double distance, ElementId typeId, double apexLegLength)
+    // tagSource runs with the new region inside its transaction.
+    private ElementId DrawLayer(double distance, ElementId typeId, double apexLegLength, Action<FilledRegion> tagSource)
     {
         View view = _drawingTools.View;
 
         _drawingTools.SetParameters(_position, distance, _rotationAngle, _fovAngle, typeId);
         return _drawingTools.DrawFilledRegion( // Use slider resolution
             _sliderResolution,
-            region => ElementTagStorage.TagCoverageRegion(region, _cameraElement, typeId, view),
+            region =>
+            {
+                ElementTagStorage.TagCoverageRegion(region, _cameraElement, typeId, view);
+                tagSource?.Invoke(region);
+            },
             apexLegLength);
+    }
+
+    // The camera family turns its 2D symbol by the rotation parameter in the opposite sense to the
+    // coverage, until the family is flipped. So after the rotation is written, the symbol's actual
+    // direction in the view is measured and, when it points away from the coverage, the family is
+    // flipped (up/down first, then left/right). A flip is kept only if it clearly brings the symbol
+    // closer to the coverage; otherwise nothing changes. A flip never affects the coverage itself
+    // or its out-of-date check.
+    private void AlignCameraSymbol(Document doc, View view)
+    {
+        if (!SettingsManager.Settings.AutoFlipCameraSymbol) return;
+        if (!(_cameraElement is FamilyInstance camera)) return;
+        if (!camera.CanFlipFacing && !camera.CanFlipHand) return;
+
+        double radians = _rotationAngle * Math.PI / 180.0;
+        XYZ coverageDirection = new XYZ(Math.Cos(radians), Math.Sin(radians), 0);
+
+        double? alignment = MeasureSymbolAlignment(camera, view, coverageDirection);
+        if (alignment == null || alignment >= 0.5) return; // Within 60°: already matches
+
+        using (Transaction transaction = new Transaction(doc, "Flip Camera Symbol"))
+        {
+            transaction.Start();
+
+            var flips = new List<Action>();
+            if (camera.CanFlipFacing) flips.Add(() => camera.flipFacing());
+            if (camera.CanFlipHand) flips.Add(() => camera.flipHand());
+
+            foreach (Action flip in flips)
+            {
+                flip();
+                doc.Regenerate();
+
+                double? after = MeasureSymbolAlignment(camera, view, coverageDirection);
+                if (after != null && after > alignment + 0.25)
+                {
+                    transaction.Commit();
+                    return;
+                }
+
+                flip(); // Didn't help: flip back
+                doc.Regenerate();
+            }
+
+            transaction.RollBack();
+        }
+    }
+
+    // Cosine of the angle between the camera's 2D symbol, as drawn in the view, and the coverage direction.
+    private static double? MeasureSymbolAlignment(FamilyInstance camera, View view, XYZ coverageDirection)
+    {
+        return CameraSymbol.GetDirection(camera, view)?.DotProduct(coverageDirection);
+    }
+
+    // Tells the window whether the selected camera's coverage in this view is still up to date.
+    private void ReportCameraCoverage()
+    {
+        if (_cameraElement == null || _mainWindow == null) return;
+
+        View view = _drawingTools.View;
+        Document doc = _drawingTools.Document;
+        List<ElementId> regions = ElementTagStorage.FindCameraCoverage(doc, view, _cameraElement);
+        _mainWindow.ShowCoverageStatus(CoverageStatus.Evaluate(doc, view, _cameraElement, regions));
+    }
+
+    // Reviews every camera with generated coverage in the view, lists the ones needing attention and
+    // selects those cameras in Revit. Nothing is redrawn automatically.
+    private void CheckViewCoverage()
+    {
+        Document doc = _drawingTools.Document;
+        View view = _drawingTools.View;
+
+        var statuses = ElementTagStorage.FindCoverageByCamera(doc, view)
+            .Select(group => CoverageStatus.Evaluate(doc, view, doc.GetElement(group.Key), group.Value))
+            .Where(s => s.State != CoverageState.None)
+            .ToList();
+
+        if (!statuses.Any())
+        {
+            MessageDialog.ShowInfo(
+                "No coverage to check",
+                $"No camera coverage drawn by Camera FOV was found in “{view.Name}”.");
+            return;
+        }
+
+        var attention = statuses.Where(s => s.State != CoverageState.Current).ToList();
+        if (!attention.Any())
+        {
+            MessageDialog.ShowSuccess(
+                "All coverage is up to date",
+                $"The coverage of all {statuses.Count} cameras in “{view.Name}” matches the cameras and the nearby Boundary lines.");
+            return;
+        }
+
+        var items = attention
+            .OrderBy(s => s.State)
+            .Select(s => new MessageDialog.Item(DescribeCamera(s), DescribeState(s)))
+            .ToList();
+
+        List<ElementId> cameras = attention.Where(s => s.Camera != null).Select(s => s.Camera.Id).ToList();
+        if (cameras.Any() && _uiDoc != null)
+            _uiDoc.Selection.SetElementIds(cameras);
+
+        MessageDialog.ShowWarning(
+            $"{attention.Count} of {statuses.Count} cameras need attention",
+            (cameras.Any() ? "Those cameras are now selected in Revit. " : string.Empty) +
+            "Select one in the Camera FOV window and press Update to redraw it. Changes in linked models only count once the walls are traced again.",
+            items);
+    }
+
+    private static string DescribeCamera(CoverageStatus status)
+    {
+        Element camera = status.Camera;
+        if (camera == null) return "Deleted camera";
+
+        string mark = camera.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)?.AsString();
+        string type = camera.Document.GetElement(camera.GetTypeId())?.Name ?? camera.Name;
+        return string.IsNullOrWhiteSpace(mark) ? type : $"{mark} · {type}";
+    }
+
+    public static string DescribeState(CoverageStatus status)
+    {
+        switch (status.State)
+        {
+            case CoverageState.Current:
+                return "Coverage is up to date.";
+            case CoverageState.Stale:
+                return $"Out of date: {string.Join(", ", status.Changes).ToLowerInvariant()} changed since it was drawn.";
+            case CoverageState.NeedsReview:
+                return "Boundary lines near the camera changed since it was drawn. Review it, or update to redraw.";
+            case CoverageState.Unknown:
+                return "Drawn by an older version, so changes can’t be tracked. Update to redraw it.";
+            case CoverageState.CameraMissing:
+                return $"The camera was deleted; {status.Regions.Count} coverage regions are left in the view.";
+            default:
+                return "No coverage in this view.";
+        }
     }
 
     public string GetName()

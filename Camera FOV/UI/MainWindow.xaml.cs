@@ -47,6 +47,8 @@ namespace Camera_FOV
         private XYZ _selectedCameraPosition;
         private double _baseCameraRotation = 0; // Auto-detected rotation from camera orientation
         private Element _selectedCameraElement = null; // Store reference to selected camera
+        private string _selectedCameraState; // Camera state when selected (see CoverageSource)
+        private CoverageStatus _coverageStatus; // Last reported coverage status of the selected camera
         private bool _applyConditionalOffset = false; // Flag for conditional 180 correction
 
         private DrawingEventHandler _drawingEventHandler;
@@ -165,6 +167,7 @@ namespace Camera_FOV
 
             Topmost = true;
             this.Closed += MainWindow_Closed;
+            this.Activated += (s, e) => RequestCoverageCheck(); // The camera may have changed in Revit meanwhile
             MessageDialog.DefaultOwner = this; // Messages from Revit-side actions centre on this window
 
             _windowResizer = new WindowResizer(this);
@@ -488,180 +491,7 @@ namespace Camera_FOV
                 if (selectedReference != null)
                 {
                     Element element = _doc.GetElement(selectedReference);
-                    if (element?.Location is LocationPoint locationPoint)
-                    {
-                        // Get the camera's position
-                        _selectedCameraPosition = locationPoint.Point;
-
-                        // Attempt to auto-detect camera facing direction
-                        double autoDetectedAngle = 0;
-                        bool angleDetected = false;
-
-                        // Method 1: Try LocationPoint.Rotation (most reliable for plan view rotation)
-                        try
-                        {
-                            double rotation = locationPoint.Rotation;
-                            double rotationDegrees = rotation * (180.0 / Math.PI);
-                            
-                            // Correct for camera family orientation (family's 0° = down, Revit's 0° = right)
-                            // Subtract 90° to align with actual facing direction
-                            autoDetectedAngle = rotationDegrees - 90.0;
-                            
-                            // Normalize to 0-360 range
-                            while (autoDetectedAngle < 0)
-                                autoDetectedAngle += 360;
-                            while (autoDetectedAngle >= 360)
-                                autoDetectedAngle -= 360;
-                            
-                            angleDetected = true;
-                        }
-                        catch
-                        {
-                            // LocationPoint.Rotation failed, try transform-based method
-                            if (element is FamilyInstance familyInstance)
-                            {
-                                try
-                                {
-                                    Autodesk.Revit.DB.Transform transform = familyInstance.GetTransform();
-                                    XYZ facingDirection = transform.BasisY; // BasisY typically represents the forward direction for many families
-                                    
-                                    double angleRadians = Math.Atan2(facingDirection.Y, facingDirection.X);
-                                    autoDetectedAngle = (angleRadians * (180.0 / Math.PI)) - 90.0; // Adjust for family orientation
-                                    
-                                    // Normalize to 0-360 range
-                                    while (autoDetectedAngle < 0)
-                                        autoDetectedAngle += 360;
-                                    while (autoDetectedAngle >= 360)
-                                        autoDetectedAngle -= 360;
-                                    
-                                    angleDetected = true;
-                                }
-                                catch
-                                {
-                                    angleDetected = false;
-                                }
-                            }
-                        }
-
-                        // Store the auto-detected base rotation silently
-                        if (angleDetected)
-                        {
-                            _baseCameraRotation = autoDetectedAngle;
-                        }
-                        else
-                        {
-                            _baseCameraRotation = 0;
-                        }
-
-                        // Read "Pööra Kaamerat" parameter (User rotation adjustment)
-                        double userRotation = 0;
-                        bool foundParam = false;
-                        
-                        // 1. Try "Pööra Kaamerat" (Instance)
-                        Parameter p1 = element.LookupParameter(SettingsManager.Settings.ParameterName_UserRotation);
-                        if (p1 != null)
-                        {
-                            double val = p1.AsDouble();
-                            userRotation = val * (180.0 / Math.PI);
-                            foundParam = true;
-                        }
-
-                        // Determine if we need the conditional 180 offset based on initial value
-                        // FIX: Only apply if value is strictly positive (checking against small epsilon)
-                        _applyConditionalOffset = foundParam && (userRotation > 0.001);
-
-                        // Store reference to element for parameter write-back
-                        _selectedCameraElement = element;
-                        ShowSelectedCamera(element);
-
-                        // Display only the user rotation in UI (base rotation is applied silently)
-                        RotationAngleTextBox.Text = userRotation.ToString("F0", CultureInfo.InvariantCulture);
-
-                        // FOV Logic
-                        // Priority 1: "Kaamera nurk" (Instance) - Manual Override if > 0
-                        // Priority 2: "Vaatenurk" (Instance) - Standard
-                        // Priority 3: "Vaatenurk" (Type) - Standard Fallback
-
-                        double finalFovDegrees = 0;
-                        bool fovFound = false;
-
-                        // 1. Check "Kaamera nurk" (Override)
-                        Parameter knInst = element.LookupParameter(SettingsManager.Settings.ParameterName_FOVOverride);
-                        if (knInst != null)
-                        {
-                            double val = knInst.AsDouble();
-                            if (Math.Abs(val) > 0.001)
-                            {
-                                finalFovDegrees = val * (180.0 / Math.PI);
-                                fovFound = true;
-                            }
-                        }
-
-                        // 2. Check "Vaatenurk" (Instance)
-                        if (!fovFound)
-                        {
-                             Parameter vnInst = element.LookupParameter(SettingsManager.Settings.ParameterName_StandardFOV);
-                             if (vnInst != null)
-                             {
-                                 finalFovDegrees = vnInst.AsDouble() * (180.0 / Math.PI);
-                                 fovFound = true;
-                             }
-                        }
-
-                        // 3. Check "Vaatenurk" (Type)
-                        if (!fovFound)
-                        {
-                            ElementId typeId = element.GetTypeId();
-                            if (typeId != null && typeId != ElementId.InvalidElementId)
-                            {
-                                if (_doc.GetElement(typeId) is ElementType elementType)
-                                {
-                                    Parameter vnType = elementType.LookupParameter(SettingsManager.Settings.ParameterName_StandardFOV);
-                                    if (vnType != null)
-                                    {
-                                        finalFovDegrees = vnType.AsDouble() * (180.0 / Math.PI);
-                                        fovFound = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (fovFound)
-                        {
-                            FOVAngleTextBox.Text = finalFovDegrees.ToString("F0", CultureInfo.InvariantCulture);
-                        }
-
-                        // Read "Horisontaalne Resolutsioon" parameter (Resolution)
-                        Parameter resolutionParameter = element.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
-
-                        // If not found on instance, try on type
-                        if (resolutionParameter == null)
-                        {
-                            ElementId typeId = element.GetTypeId();
-                            if (typeId != null && typeId != ElementId.InvalidElementId)
-                            {
-                                if (_doc.GetElement(typeId) is ElementType elementType)
-                                {
-                                    resolutionParameter = elementType.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
-                                }
-                            }
-                        }
-
-                        // Read "Horisontaalne Resolutsioon" parameter (Resolution) with robust fallback
-                        int resolvedValue;
-                        if (TryGetResolutionFromInstanceOrType(element, out resolvedValue))
-                        {
-                            SelectResolutionInComboOrFallback(resolvedValue);
-                        }
-                        else
-                        {
-                            // Parameter missing on both instance and type: use saved fallback without interrupting the user
-                            SelectResolutionInComboOrFallback();
-                        }
-
-                        // Continue with drawing updates if needed
-                        SendPreviewUpdate();
-                    }
+                    LoadCamera(element);
                 }
 
                 // Restore the plugin window without resizing Revit
@@ -687,6 +517,282 @@ namespace Camera_FOV
             }
         }
 
+
+        // Reads the camera's position, orientation, rotation, FOV and resolution into the window.
+        // Used when a camera is picked and when its coverage is updated from the model.
+        private bool LoadCamera(Element element)
+        {
+            if (!(element?.Location is LocationPoint locationPoint)) return false;
+
+            // Get the camera's position
+            _selectedCameraPosition = locationPoint.Point;
+
+            // Attempt to auto-detect camera facing direction
+            double autoDetectedAngle = 0;
+            bool angleDetected = false;
+
+            // Method 1: Try LocationPoint.Rotation (most reliable for plan view rotation)
+            try
+            {
+                double rotation = locationPoint.Rotation;
+                double rotationDegrees = rotation * (180.0 / Math.PI);
+                
+                // Correct for camera family orientation (family's 0° = down, Revit's 0° = right)
+                // Subtract 90° to align with actual facing direction
+                autoDetectedAngle = rotationDegrees - 90.0;
+                
+                // Normalize to 0-360 range
+                while (autoDetectedAngle < 0)
+                    autoDetectedAngle += 360;
+                while (autoDetectedAngle >= 360)
+                    autoDetectedAngle -= 360;
+                
+                angleDetected = true;
+            }
+            catch
+            {
+                // LocationPoint.Rotation failed, try transform-based method
+                if (element is FamilyInstance familyInstance)
+                {
+                    try
+                    {
+                        Autodesk.Revit.DB.Transform transform = familyInstance.GetTransform();
+                        XYZ facingDirection = transform.BasisY; // BasisY typically represents the forward direction for many families
+                        
+                        double angleRadians = Math.Atan2(facingDirection.Y, facingDirection.X);
+                        autoDetectedAngle = (angleRadians * (180.0 / Math.PI)) - 90.0; // Adjust for family orientation
+                        
+                        // Normalize to 0-360 range
+                        while (autoDetectedAngle < 0)
+                            autoDetectedAngle += 360;
+                        while (autoDetectedAngle >= 360)
+                            autoDetectedAngle -= 360;
+                        
+                        angleDetected = true;
+                    }
+                    catch
+                    {
+                        angleDetected = false;
+                    }
+                }
+            }
+
+            // Store the auto-detected base rotation silently
+            if (angleDetected)
+            {
+                _baseCameraRotation = autoDetectedAngle;
+            }
+            else
+            {
+                _baseCameraRotation = 0;
+            }
+
+            // Read "Pööra Kaamerat" parameter (User rotation adjustment)
+            double userRotation = 0;
+            bool foundParam = false;
+            
+            // 1. Try "Pööra Kaamerat" (Instance)
+            Parameter p1 = element.LookupParameter(SettingsManager.Settings.ParameterName_UserRotation);
+            if (p1 != null)
+            {
+                double val = p1.AsDouble();
+                userRotation = val * (180.0 / Math.PI);
+                foundParam = true;
+            }
+
+            // Determine if we need the conditional 180 offset based on initial value
+            // FIX: Only apply if value is strictly positive (checking against small epsilon)
+            _applyConditionalOffset = foundParam && (userRotation > 0.001);
+
+            // Store reference to element for parameter write-back
+            _selectedCameraElement = element;
+            ShowSelectedCamera(element);
+
+            // Display only the user rotation in UI (base rotation is applied silently)
+            RotationAngleTextBox.Text = userRotation.ToString("F0", CultureInfo.InvariantCulture);
+
+            // Start from where the camera's 2D symbol actually points, so the direction line lies along
+            // it whatever the family's orientation or flips. The rotation typed in the window then turns
+            // the coverage from there. The orientation-based guess above is kept only as a fallback for
+            // symbols without a clear direction.
+            double? symbolAngle = CameraSymbol.GetAngleDegrees(element, _currentView);
+            if (symbolAngle.HasValue)
+            {
+                double shownRotation = double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double shown) ? shown : 0;
+                _applyConditionalOffset = false;
+                _baseCameraRotation = symbolAngle.Value - shownRotation - presetRotationAngle;
+            }
+
+            // FOV Logic
+            // Priority 1: "Kaamera nurk" (Instance) - Manual Override if > 0
+            // Priority 2: "Vaatenurk" (Instance) - Standard
+            // Priority 3: "Vaatenurk" (Type) - Standard Fallback
+
+            double finalFovDegrees = 0;
+            bool fovFound = false;
+
+            // 1. Check "Kaamera nurk" (Override)
+            Parameter knInst = element.LookupParameter(SettingsManager.Settings.ParameterName_FOVOverride);
+            if (knInst != null)
+            {
+                double val = knInst.AsDouble();
+                if (Math.Abs(val) > 0.001)
+                {
+                    finalFovDegrees = val * (180.0 / Math.PI);
+                    fovFound = true;
+                }
+            }
+
+            // 2. Check "Vaatenurk" (Instance)
+            if (!fovFound)
+            {
+                 Parameter vnInst = element.LookupParameter(SettingsManager.Settings.ParameterName_StandardFOV);
+                 if (vnInst != null)
+                 {
+                     finalFovDegrees = vnInst.AsDouble() * (180.0 / Math.PI);
+                     fovFound = true;
+                 }
+            }
+
+            // 3. Check "Vaatenurk" (Type)
+            if (!fovFound)
+            {
+                ElementId typeId = element.GetTypeId();
+                if (typeId != null && typeId != ElementId.InvalidElementId)
+                {
+                    if (_doc.GetElement(typeId) is ElementType elementType)
+                    {
+                        Parameter vnType = elementType.LookupParameter(SettingsManager.Settings.ParameterName_StandardFOV);
+                        if (vnType != null)
+                        {
+                            finalFovDegrees = vnType.AsDouble() * (180.0 / Math.PI);
+                            fovFound = true;
+                        }
+                    }
+                }
+            }
+
+            if (fovFound)
+            {
+                FOVAngleTextBox.Text = finalFovDegrees.ToString("F0", CultureInfo.InvariantCulture);
+            }
+
+            // Read "Horisontaalne Resolutsioon" parameter (Resolution)
+            Parameter resolutionParameter = element.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
+
+            // If not found on instance, try on type
+            if (resolutionParameter == null)
+            {
+                ElementId typeId = element.GetTypeId();
+                if (typeId != null && typeId != ElementId.InvalidElementId)
+                {
+                    if (_doc.GetElement(typeId) is ElementType elementType)
+                    {
+                        resolutionParameter = elementType.LookupParameter(SettingsManager.Settings.ParameterName_Resolution);
+                    }
+                }
+            }
+
+            // Read "Horisontaalne Resolutsioon" parameter (Resolution) with robust fallback
+            int resolvedValue;
+            if (TryGetResolutionFromInstanceOrType(element, out resolvedValue))
+            {
+                SelectResolutionInComboOrFallback(resolvedValue);
+            }
+            else
+            {
+                // Parameter missing on both instance and type: use saved fallback without interrupting the user
+                SelectResolutionInComboOrFallback();
+            }
+
+            // Show the direction line for the loaded camera straight away
+            SendPreviewUpdate();
+
+            // What the camera looks like now, recorded with the coverage drawn for it (issue #9)
+            _selectedCameraState = CoverageSource.CaptureCameraState(element);
+            RequestCoverageCheck();
+            return true;
+        }
+
+        // ------------------------------
+        // COVERAGE STATUS (issue #9)
+        // ------------------------------
+        private void RequestCoverageCheck()
+        {
+            if (_selectedCameraElement == null || !_selectedCameraElement.IsValidObject) return;
+            SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CheckCoverage, _drawingTools, _selectedCameraElement));
+        }
+
+        // Called by the handler on the Revit thread with the selected camera's coverage status.
+        public void ShowCoverageStatus(CoverageStatus status)
+        {
+            _coverageStatus = status;
+
+            if (status == null || status.State == CoverageState.None)
+            {
+                CoverageStatusRow.Visibility = System.Windows.Visibility.Collapsed;
+                return;
+            }
+
+            switch (status.State)
+            {
+                case CoverageState.Current:
+                    CoverageStatusIcon.Kind = MaterialDesignThemes.Wpf.PackIconKind.CheckCircleOutline;
+                    CoverageStatusIcon.SetResourceReference(ForegroundProperty, "Status.Success");
+                    break;
+                case CoverageState.Stale:
+                    CoverageStatusIcon.Kind = MaterialDesignThemes.Wpf.PackIconKind.AlertOutline;
+                    CoverageStatusIcon.SetResourceReference(ForegroundProperty, "Status.Warning");
+                    break;
+                default:
+                    CoverageStatusIcon.Kind = MaterialDesignThemes.Wpf.PackIconKind.InformationOutline;
+                    CoverageStatusIcon.SetResourceReference(ForegroundProperty, "Accent.Text");
+                    break;
+            }
+
+            CoverageStatusText.Text = DrawingEventHandler.DescribeState(status);
+            CoverageStatusText.ToolTip = CoverageStatusText.Text;
+            UpdateCoverageButton.Visibility = status.State == CoverageState.Current
+                ? System.Windows.Visibility.Collapsed
+                : System.Windows.Visibility.Visible;
+            CoverageStatusRow.Visibility = System.Windows.Visibility.Visible;
+        }
+
+        // Redraws the selected camera's coverage from the camera as it is now in the model, for the
+        // same DORI levels it already has. Rotation and FOV typed in the window are replaced by the
+        // camera's values, because updating means matching the model.
+        private void UpdateCoverageButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCameraElement == null || !_selectedCameraElement.IsValidObject)
+            {
+                MessageDialog.ShowWarning("No camera to update", "Select the camera again and press Update.", owner: this);
+                return;
+            }
+
+            if (!LoadCamera(_selectedCameraElement))
+            {
+                MessageDialog.ShowWarning("Can’t read the camera", "The camera has no location point, so its coverage can’t be redrawn.", owner: this);
+                return;
+            }
+
+            // Tick exactly the DORI levels the existing coverage has
+            if (_coverageStatus != null && _coverageStatus.RegionTypeIds.Any())
+            {
+                var existingNames = _coverageStatus.RegionTypeIds
+                    .Select(id => _doc.GetElement(id)?.Name ?? string.Empty)
+                    .ToList();
+
+                foreach (var pair in _doriRegionMapping)
+                    pair.Key.IsChecked = existingNames.Any(name => name.Contains(pair.Value));
+            }
+
+            FilledRegionButton_Click(sender, e);
+        }
+
+        private void CheckViewCoverageButton_Click(object sender, RoutedEventArgs e)
+        {
+            SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CheckViewCoverage, _drawingTools));
+        }
 
         // Shows which camera the panel is working on, so the current state is always visible.
         private void ShowSelectedCamera(Element camera)
@@ -802,7 +908,8 @@ namespace Camera_FOV
                     _sliderResolution, // Corrected: Use slider value (degrees), not camera pixels
                     userRotation,
                     doriLayers,
-                    CheckboxIdentification.IsChecked == true));
+                    CheckboxIdentification.IsChecked == true,
+                    _selectedCameraState));
             }
             catch (Exception ex)
             {
@@ -814,7 +921,7 @@ namespace Camera_FOV
         {
             try
             {
-                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.UndoFilledRegion, _drawingTools));
+                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.UndoFilledRegion, _drawingTools, _selectedCameraElement));
             }
             catch (Exception ex)
             {

@@ -184,6 +184,14 @@
                                     Text="Faster" />
                                 <TextBlock Style="{StaticResource Type.Caption}" Text="Smoother" />
                             </DockPanel>
+                            <CheckBox
+                                x:Name="AutoFlipCheckBox"
+                                Margin="0,12,0,0"
+                                AutomationProperties.Name="Flip the camera symbol to match the coverage"
+                                Style="{StaticResource Input.Check}"
+                                ToolTip="When drawing, flip the camera family if its 2D symbol points away from the coverage">
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Flip camera symbol to match coverage" />
+                            </CheckBox>
                         </StackPanel>
                     </Border>
                     <TextBlock

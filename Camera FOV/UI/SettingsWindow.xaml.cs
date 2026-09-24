@@ -52,6 +52,7 @@ namespace Camera_FOV
             DimensionTypeComboBox.SelectedItem = saved.Length > 0 ? saved : NoDimension;
 
             DimensionDistanceTextBox.Text = SettingsManager.Settings.FovDimensionDistanceMeters.ToString("0.##", CultureInfo.InvariantCulture);
+            AutoFlipCheckBox.IsChecked = SettingsManager.Settings.AutoFlipCameraSymbol;
         }
 
         private static bool TryParseDistance(string text, out double meters)
@@ -99,6 +100,7 @@ namespace Camera_FOV
             string dimensionType = DimensionTypeComboBox.SelectedItem as string;
             SettingsManager.Settings.FovDimensionTypeName = dimensionType == null || dimensionType == NoDimension ? string.Empty : dimensionType;
             SettingsManager.Settings.FovDimensionDistanceMeters = dimensionDistance;
+            SettingsManager.Settings.AutoFlipCameraSymbol = AutoFlipCheckBox.IsChecked == true;
 
             SettingsManager.Settings.ParameterName_UserRotation = ParamRotation.Text;
             SettingsManager.Settings.ParameterName_FOVOverride = ParamFOVOverride.Text;

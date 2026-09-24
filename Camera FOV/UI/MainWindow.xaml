@@ -40,6 +40,18 @@
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         Orientation="Horizontal">
+                        <Button
+                            x:Name="CheckViewCoverageButton"
+                            Margin="0,0,2,0"
+                            AutomationProperties.Name="Check coverage in this view"
+                            Click="CheckViewCoverageButton_Click"
+                            Style="{StaticResource Button.Icon}"
+                            ToolTip="Check which cameras in this view have coverage that is out of date">
+                            <materialDesign:PackIcon
+                                Width="16"
+                                Height="16"
+                                Kind="ClipboardCheckOutline" />
+                        </Button>
                         <ToggleButton
                             x:Name="ThemeToggleButton"
                             AutomationProperties.Name="Switch between dark and light appearance"
@@ -71,6 +83,7 @@
 
                     <!--  ============ Camera: current selection is always visible ============  -->
                     <Border Padding="12,10" Style="{StaticResource Card}">
+                        <StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -119,6 +132,41 @@
                                 Style="{StaticResource Button.Small}"
                                 ToolTip="Pick a camera (security device) in the active view" />
                         </Grid>
+
+                        <!--  Whether the camera's coverage in this view still matches the camera (issue #9)  -->
+                        <Grid
+                            x:Name="CoverageStatusRow"
+                            Margin="0,10,0,0"
+                            Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <materialDesign:PackIcon
+                                x:Name="CoverageStatusIcon"
+                                Width="16"
+                                Height="16"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                Kind="InformationOutline" />
+                            <TextBlock
+                                x:Name="CoverageStatusText"
+                                Grid.Column="1"
+                                Margin="18,0,8,0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource Type.Caption}"
+                                TextWrapping="Wrap" />
+                            <Button
+                                x:Name="UpdateCoverageButton"
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                Click="UpdateCoverageButton_Click"
+                                Content="Update"
+                                Style="{StaticResource Button.Small}"
+                                ToolTip="Redraw this camera's coverage from the camera as it is now, for the DORI levels it already has" />
+                        </Grid>
+                        </StackPanel>
                     </Border>
 
                     <!--  ============ Camera parameters ============  -->

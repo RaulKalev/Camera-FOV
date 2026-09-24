@@ -24,6 +24,9 @@ namespace Camera_FOV.Handlers
         public IReadOnlyList<DoriLayerConfig> DoriLayers { get; }
         public bool DrawAngularDimension { get; }
 
+        // The camera's state when it was selected in the window (see CoverageSource.MergeDrawnState).
+        public string CameraStateAtSelection { get; }
+
         public DrawingRequest(
             DrawingEventHandler.DrawingAction action,
             DrawingTools drawingTools,
@@ -36,8 +39,10 @@ namespace Camera_FOV.Handlers
             double sliderResolution = 1.0,
             double userRotation = 0,
             IEnumerable<DoriLayerConfig> doriLayers = null,
-            bool drawAngularDimension = false)
+            bool drawAngularDimension = false,
+            string cameraStateAtSelection = null)
         {
+            CameraStateAtSelection = cameraStateAtSelection;
             Action = action;
             DrawingTools = drawingTools;
             Document = drawingTools.Document;
@@ -59,6 +64,12 @@ namespace Camera_FOV.Handlers
 
         // Live previews can be merged; only the newest one matters.
         public bool IsPreview => Action == DrawingEventHandler.DrawingAction.Update;
+
+        // Requests that replace a waiting request of the same action: previews and automatic status checks.
+        public bool IsCoalescable => IsPreview || Action == DrawingEventHandler.DrawingAction.CheckCoverage;
+
+        // Requests the user didn't explicitly ask for: when skipped, nothing is reported.
+        public bool IsSilent => IsCoalescable || Action == DrawingEventHandler.DrawingAction.Delete;
 
         // Window-close cleanup of the preview line may run in a project that is no longer active.
         public bool RequiresActiveDocument => Action != DrawingEventHandler.DrawingAction.Delete;
@@ -82,6 +93,7 @@ namespace Camera_FOV.Handlers
                     case DrawingEventHandler.DrawingAction.CreateBoundaryLine: return "Creating the Boundary line style";
                     case DrawingEventHandler.DrawingAction.CreateFilledRegions: return "Creating the DORI filled region types";
                     case DrawingEventHandler.DrawingAction.TraceWallsAndDrawBoundary: return "Tracing the boundaries";
+                    case DrawingEventHandler.DrawingAction.CheckViewCoverage: return "Checking the coverage";
                     default: return $"The {Action} action";
                 }
             }

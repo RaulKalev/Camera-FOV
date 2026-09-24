@@ -19,6 +19,11 @@ namespace Camera_FOV.Services
         // Schema GUIDs must never change once released: existing projects reference them.
         private static readonly Guid CoverageSchemaGuid = new Guid("6C0E2F4B-9A51-4D6B-8E0B-3B1F6A2C7D41");
         private static readonly Guid TracedBoundarySchemaGuid = new Guid("B7D3A9E2-4F18-4C3A-9D6E-5A2E8C1F0B63");
+        private static readonly Guid CoverageSourceSchemaGuid = new Guid("E4A1C7D9-2B6F-4F3E-8A15-9C0D7B3E6F28");
+
+        private const string FieldCameraState = "CameraState";
+        private const string FieldBoundaryState = "BoundaryState";
+        private const string FieldReach = "Reach";
 
         private const string FieldOwnerUniqueId = "OwnerUniqueId";
         private const string FieldViewUniqueId = "ViewUniqueId";
@@ -80,6 +85,83 @@ namespace Camera_FOV.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// All regions generated for this camera in this view, whatever their DORI type.
+        /// </summary>
+        public static List<ElementId> FindCameraCoverage(Document doc, View view, Element camera)
+        {
+            if (camera == null) return new List<ElementId>();
+
+            return FindCoverageByCamera(doc, view).TryGetValue(camera.UniqueId, out List<ElementId> regions)
+                ? regions
+                : new List<ElementId>();
+        }
+
+        /// <summary>
+        /// Generated coverage regions in the view, grouped by the UniqueId of their camera.
+        /// </summary>
+        public static Dictionary<string, List<ElementId>> FindCoverageByCamera(Document doc, View view)
+        {
+            var result = new Dictionary<string, List<ElementId>>();
+            if (doc == null || view == null) return result;
+
+            Schema schema = Schema.Lookup(CoverageSchemaGuid);
+            if (schema == null) return result;
+
+            var regions = new FilteredElementCollector(doc, view.Id)
+                .OfClass(typeof(FilledRegion))
+                .WhereElementIsNotElementType();
+
+            foreach (Element region in regions)
+            {
+                Entity entity = region.GetEntity(schema);
+                if (!IsOwnedBy(entity, region) || entity.Get<string>(FieldViewUniqueId) != view.UniqueId) continue;
+
+                string cameraId = entity.Get<string>(FieldCameraUniqueId);
+                if (!result.TryGetValue(cameraId, out List<ElementId> list))
+                    result[cameraId] = list = new List<ElementId>();
+                list.Add(region.Id);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Records what a region was drawn from (see <see cref="CoverageSource"/>).
+        /// Must be called inside an open transaction.
+        /// </summary>
+        public static void TagCoverageSource(Element region, string cameraState, string boundaryState, double reach)
+        {
+            if (region == null) return;
+
+            Entity entity = new Entity(GetCoverageSourceSchema());
+            entity.Set(FieldOwnerUniqueId, region.UniqueId);
+            entity.Set(FieldCameraState, cameraState ?? string.Empty);
+            entity.Set(FieldBoundaryState, boundaryState ?? string.Empty);
+            entity.Set(FieldReach, reach.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            region.SetEntity(entity);
+        }
+
+        /// <summary>
+        /// Reads what a region was drawn from. False for regions drawn before this was recorded, and for copies.
+        /// </summary>
+        public static bool TryGetCoverageSource(Element region, out string cameraState, out string boundaryState, out double reach)
+        {
+            cameraState = boundaryState = null;
+            reach = 0;
+
+            Schema schema = Schema.Lookup(CoverageSourceSchemaGuid);
+            if (region == null || schema == null) return false;
+
+            Entity entity = region.GetEntity(schema);
+            if (!IsOwnedBy(entity, region)) return false;
+
+            cameraState = entity.Get<string>(FieldCameraState);
+            boundaryState = entity.Get<string>(FieldBoundaryState);
+            double.TryParse(entity.Get<string>(FieldReach), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out reach);
+            return true;
         }
 
         // Stored in the region type field of the coverage schema to mark a camera's field-of-view
@@ -190,6 +272,23 @@ namespace Camera_FOV.Services
             builder.AddSimpleField(FieldViewUniqueId, typeof(string));
             builder.AddSimpleField(FieldCameraUniqueId, typeof(string));
             builder.AddSimpleField(FieldRegionTypeUniqueId, typeof(string));
+            return builder.Finish();
+        }
+
+        private static Schema GetCoverageSourceSchema()
+        {
+            Schema schema = Schema.Lookup(CoverageSourceSchemaGuid);
+            if (schema != null) return schema;
+
+            SchemaBuilder builder = new SchemaBuilder(CoverageSourceSchemaGuid);
+            builder.SetSchemaName("CameraFovCoverageSource");
+            builder.SetDocumentation("What a Camera FOV coverage region was drawn from, to detect when it is out of date.");
+            builder.SetReadAccessLevel(AccessLevel.Public);
+            builder.SetWriteAccessLevel(AccessLevel.Public);
+            builder.AddSimpleField(FieldOwnerUniqueId, typeof(string));
+            builder.AddSimpleField(FieldCameraState, typeof(string));
+            builder.AddSimpleField(FieldBoundaryState, typeof(string));
+            builder.AddSimpleField(FieldReach, typeof(string));
             return builder.Finish();
         }
 

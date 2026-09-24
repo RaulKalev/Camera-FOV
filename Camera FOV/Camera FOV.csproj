@@ -6,9 +6,6 @@
     <PlatformTarget>x64</PlatformTarget>
     <UseWPF>true</UseWPF>
   </PropertyGroup>
-	<ItemGroup>
-		<EmbeddedResource Include="Assets\Camera.tiff" />
-	</ItemGroup>
   <ItemGroup>
     <PackageReference Include="Costura.Fody" Version="6.0.0">
       <PrivateAssets>all</PrivateAssets>
@@ -42,7 +39,11 @@
     </Reference>
   </ItemGroup>
 	<ItemGroup>
-		<Resource Include="Assets\Camera.tiff">
+		<!--  Ribbon icons: Revit's light and dark UI themes (see Core/App.cs)  -->
+		<Resource Include="Assets\CameraFOV-Light.tiff">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</Resource>
+		<Resource Include="Assets\CameraFOV-Dark.tiff">
 			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
 		</Resource>
 	</ItemGroup>

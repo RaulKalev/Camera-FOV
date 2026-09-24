@@ -22,5 +22,8 @@ namespace Camera_FOV.Models
         // turns the dimension off; a name missing from a project falls back to another angular type.
         public string FovDimensionTypeName { get; set; } = "Kaamera nurk";
         public double FovDimensionDistanceMeters { get; set; } = 2.0;
+
+        // Flip the camera family when drawing if its 2D symbol ends up pointing away from the coverage
+        public bool AutoFlipCameraSymbol { get; set; } = true;
     }
 }
