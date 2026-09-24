@@ -794,6 +794,47 @@ namespace Camera_FOV
             SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CheckViewCoverage, _drawingTools));
         }
 
+        private void CoverageAuditButton_Click(object sender, RoutedEventArgs e)
+        {
+            SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CoverageAudit, _drawingTools));
+        }
+
+        // Pick a spot in the plan and list which cameras see it, and how well (issue #7)
+        private void CheckPointButton_Click(object sender, RoutedEventArgs e)
+        {
+            XYZ point = null;
+            try
+            {
+                this.Hide();
+                this.Topmost = false;
+
+                IntPtr revitHandle = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+                if (revitHandle != IntPtr.Zero)
+                    SetForegroundWindow(revitHandle);
+
+                point = _uiDoc.Selection.PickPoint("Pick a point to check which cameras cover it");
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                // Esc: nothing to check
+            }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException)
+            {
+                MessageDialog.ShowWarning(
+                    "Can’t pick a point here",
+                    "Revit needs a work plane to pick a point. Open a floor plan, or set a work plane for this view, then try again.");
+            }
+            finally
+            {
+                this.Show();
+                this.Topmost = true;
+                this.Activate();
+            }
+
+            if (point != null)
+                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CheckPoint, _drawingTools, position: point));
+        }
+
         // Shows which camera the panel is working on, so the current state is always visible.
         private void ShowSelectedCamera(Element camera)
         {
@@ -909,7 +950,8 @@ namespace Camera_FOV
                     userRotation,
                     doriLayers,
                     CheckboxIdentification.IsChecked == true,
-                    _selectedCameraState));
+                    _selectedCameraState,
+                    cameraResolution: resolution));
             }
             catch (Exception ex)
             {

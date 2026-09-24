@@ -40,7 +40,9 @@ namespace Camera_FOV.Handlers
         TraceWallsAndDrawBoundary,
         CheckCoverage,
         CheckViewCoverage,
-        SaveTracingRules
+        SaveTracingRules,
+        CheckPoint,
+        CoverageAudit
     }
 
     // Requests wait here in the order the user made them until Revit runs the external event.
@@ -66,6 +68,7 @@ namespace Camera_FOV.Handlers
     private bool _drawAngularDimension;
     private IReadOnlyList<DoriLayerConfig> _doriLayers;
     private string _cameraStateAtSelection;
+    private int _cameraResolution; // Horizontal pixels the DORI distances were calculated with
 
     // Must be constructed in a Revit API context (e.g. while an external command runs).
     public DrawingEventHandler()
@@ -190,6 +193,7 @@ namespace Camera_FOV.Handlers
         _doriLayers = request.DoriLayers;
         _drawAngularDimension = request.DrawAngularDimension;
         _cameraStateAtSelection = request.CameraStateAtSelection;
+        _cameraResolution = request.CameraResolution;
     }
 
     private void Run(UIApplication app, DrawingRequest request)
@@ -271,6 +275,14 @@ namespace Camera_FOV.Handlers
 
                 case DrawingAction.CheckViewCoverage:
                     CheckViewCoverage();
+                    break;
+
+                case DrawingAction.CheckPoint:
+                    ReportPointCoverage(request.Position);
+                    break;
+
+                case DrawingAction.CoverageAudit:
+                    OpenCoverageAudit();
                     break;
 
                 case DrawingAction.SaveTracingRules:
@@ -1454,7 +1466,9 @@ namespace Camera_FOV.Handlers
                 // whether it still matches the camera (issue #9). Captured after the parameter write.
                 double reach = layers.Max(l => l.Distance) / 0.3048;
                 string cameraState = _cameraElement != null
-                    ? CoverageSource.MergeDrawnState(_cameraStateAtSelection, CoverageSource.CaptureCameraState(_cameraElement))
+                    ? CoverageSource.WithDrawnValues(
+                        CoverageSource.MergeDrawnState(_cameraStateAtSelection, CoverageSource.CaptureCameraState(_cameraElement)),
+                        _rotationAngle, _fovAngle, _cameraResolution)
                     : null;
                 string boundaryState = _cameraElement != null
                     ? CoverageSource.CaptureBoundaryState(doc, view, _position, reach)
@@ -1774,14 +1788,82 @@ namespace Camera_FOV.Handlers
             items);
     }
 
-    private static string DescribeCamera(CoverageStatus status)
-    {
-        Element camera = status.Camera;
-        if (camera == null) return "Deleted camera";
+    private static string DescribeCamera(CoverageStatus status) => CameraData.Describe(status.Camera);
 
-        string mark = camera.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)?.AsString();
-        string type = camera.Document.GetElement(camera.GetTypeId())?.Name ?? camera.Name;
-        return string.IsNullOrWhiteSpace(mark) ? type : $"{mark} · {type}";
+    // Which cameras see a picked point and how well (issue #7). Read-only.
+    private void ReportPointCoverage(XYZ point)
+    {
+        if (point == null) return;
+
+        Document doc = _drawingTools.Document;
+        View view = _drawingTools.View;
+        List<PointResult> results = PointCoverage.Evaluate(doc, view, point);
+
+        if (!results.Any())
+        {
+            MessageDialog.ShowInfo(
+                "No cameras to check",
+                $"No cameras (security devices with the “{SettingsManager.Settings.ParameterName_UserRotation}” parameter) are visible in “{view.Name}”.");
+            return;
+        }
+
+        List<PointResult> covering = results
+            .Where(r => r.Verdict == PointVerdict.Covered)
+            .OrderByDescending(r => r.PixelsPerMeter)
+            .ToList();
+
+        // The nearest cameras that don't cover it, with their reason; far-away ones would only add noise
+        const int maxOthers = 12;
+        List<PointResult> others = results
+            .Where(r => r.Verdict != PointVerdict.Covered)
+            .OrderBy(r => r.Verdict == PointVerdict.Unknown ? 0 : 1)
+            .ThenBy(r => r.DistanceMeters)
+            .ToList();
+
+        var items = covering.Concat(others.Take(maxOthers))
+            .Select(r => new MessageDialog.Item(
+                CameraData.Describe(r.Camera),
+                r.Reason + (r.CoverageState == CoverageState.Stale ? " Its drawn coverage is out of date." : string.Empty)))
+            .ToList();
+
+        string heading = covering.Any()
+            ? $"{covering[0].Level.Name} coverage here"
+            : "No camera covers this point";
+        string message = covering.Any()
+            ? $"{covering.Count} of {results.Count} cameras cover this point; the best reaches {covering[0].PixelsPerMeter:0} px/m."
+            : $"None of the {results.Count} cameras in this view reaches Detection density here.";
+        if (others.Count > maxOthers)
+            message += $" {others.Count - maxOthers} more distant cameras aren’t listed.";
+        message += " Plan-view check: camera height and tilt are not modelled.";
+
+        MessageDialog.Show(covering.Any() ? MessageDialog.Kind.Info : MessageDialog.Kind.Warning, heading, message, items);
+    }
+
+    // Collects the view's coverage and rooms and opens the read-only audit window (issue #6).
+    private void OpenCoverageAudit()
+    {
+        Document doc = _drawingTools.Document;
+        if (!(_drawingTools.View is ViewPlan view))
+        {
+            MessageDialog.ShowWarning("The audit needs a plan view", "Open Camera FOV in a floor plan to audit its coverage.");
+            return;
+        }
+
+        TraceRange range = GetTraceRange(view);
+        AuditData data = CoverageAudit.Collect(doc, view, range?.CutZ ?? (view.GenLevel?.ProjectElevation ?? 0) + 4);
+
+        if (!data.Regions.Any())
+        {
+            MessageDialog.ShowInfo(
+                "No coverage to audit",
+                $"No camera coverage drawn by Camera FOV was found in “{view.Name}”." +
+                (data.UntaggedDoriRegions > 0 ? $" {data.UntaggedDoriRegions} DORI regions aren’t linked to a camera; redraw them to include them." : string.Empty));
+            return;
+        }
+
+        var window = new CoverageAuditWindow(data);
+        if (_mainWindow != null && _mainWindow.IsVisible) window.Owner = _mainWindow;
+        window.Show();
     }
 
     public static string DescribeState(CoverageStatus status)

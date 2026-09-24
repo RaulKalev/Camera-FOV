@@ -30,6 +30,9 @@ namespace Camera_FOV.Handlers
         // Rules to store in the project (SaveTracingRules only)
         public Models.TracingRules TracingRules { get; }
 
+        // Horizontal resolution (pixels) the DORI distances were calculated with (DrawFilledRegion)
+        public int CameraResolution { get; }
+
         public DrawingRequest(
             DrawingEventHandler.DrawingAction action,
             DrawingTools drawingTools,
@@ -44,10 +47,12 @@ namespace Camera_FOV.Handlers
             IEnumerable<DoriLayerConfig> doriLayers = null,
             bool drawAngularDimension = false,
             string cameraStateAtSelection = null,
-            Models.TracingRules tracingRules = null)
+            Models.TracingRules tracingRules = null,
+            int cameraResolution = 0)
         {
             CameraStateAtSelection = cameraStateAtSelection;
             TracingRules = tracingRules;
+            CameraResolution = cameraResolution;
             Action = action;
             DrawingTools = drawingTools;
             Document = drawingTools.Document;
@@ -100,6 +105,8 @@ namespace Camera_FOV.Handlers
                     case DrawingEventHandler.DrawingAction.TraceWallsAndDrawBoundary: return "Tracing the boundaries";
                     case DrawingEventHandler.DrawingAction.CheckViewCoverage: return "Checking the coverage";
                     case DrawingEventHandler.DrawingAction.SaveTracingRules: return "Saving the tracing rules";
+                    case DrawingEventHandler.DrawingAction.CheckPoint: return "Checking the point";
+                    case DrawingEventHandler.DrawingAction.CoverageAudit: return "The coverage audit";
                     default: return $"The {Action} action";
                 }
             }

@@ -81,6 +81,37 @@ namespace Camera_FOV.Services
             return string.Join(";", merged.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}"));
         }
 
+        // The values the coverage was actually drawn with: direction (degrees, plan), FOV (degrees) and
+        // horizontal resolution (pixels). The window supplies FOV and resolution when the camera family
+        // has no such parameters, so these are the reliable source for the point check and the audit.
+        // Stored with the state but never compared: they follow from the compared values.
+        private const string DrawnAim = "aim";
+        private const string DrawnFov = "dfov";
+        private const string DrawnResolution = "dres";
+
+        public static string WithDrawnValues(string state, double aimDegrees, double fovDegrees, int resolution)
+        {
+            string result = $"{state};{DrawnAim}={Round(aimDegrees, 3)};{DrawnFov}={Round(fovDegrees, 3)}";
+            return resolution > 0 ? $"{result};{DrawnResolution}={resolution.ToString(CultureInfo.InvariantCulture)}" : result;
+        }
+
+        public static bool TryGetDrawnAim(string state, out double aimDegrees) => TryGetNumber(state, DrawnAim, out aimDegrees);
+
+        public static bool TryGetDrawnFov(string state, out double fovDegrees) => TryGetNumber(state, DrawnFov, out fovDegrees) && fovDegrees > 0;
+
+        public static bool TryGetDrawnResolution(string state, out int resolution)
+        {
+            resolution = 0;
+            return TryGetNumber(state, DrawnResolution, out double value) && (resolution = (int)Math.Round(value)) > 0;
+        }
+
+        private static bool TryGetNumber(string state, string key, out double number)
+        {
+            number = 0;
+            return Parse(state).TryGetValue(key, out string value)
+                && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out number);
+        }
+
         // Names of what differs between two camera states, e.g. "Position", "Rotation".
         public static List<string> CompareCameraStates(string stored, string current)
         {

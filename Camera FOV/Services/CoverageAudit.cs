@@ -1,0 +1,199 @@
+using Autodesk.Revit.DB;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Camera_FOV.Services
+{
+    /// <summary>A point in plan, in feet (Revit internal units).</summary>
+    public struct PlanPoint
+    {
+        public double X;
+        public double Y;
+
+        public PlanPoint(double x, double y)
+        {
+            X = x;
+            Y = y;
+        }
+    }
+
+    public sealed class AuditCamera
+    {
+        public string UniqueId;
+        public string Label;
+        public PlanPoint? Position;
+        public int? Resolution;
+        public double? FovDegrees;
+        public CoverageState State;
+    }
+
+    public sealed class AuditRegion
+    {
+        public string CameraUniqueId;
+        public int LevelIndex;
+        public List<List<PlanPoint>> Loops = new List<List<PlanPoint>>();
+    }
+
+    /// <summary>Plain data for the coverage audit window, so the window never touches the Revit API.</summary>
+    public sealed class AuditData
+    {
+        public string ViewName;
+        public List<AuditCamera> Cameras = new List<AuditCamera>();
+        public List<AuditRegion> Regions = new List<AuditRegion>();
+        public List<List<List<PlanPoint>>> Rooms = new List<List<List<PlanPoint>>>(); // room → loops → points
+        public List<List<PlanPoint>> BoundaryLines = new List<List<PlanPoint>>(); // Obstructions, as open polylines
+        public int HiddenRegions;
+        public int UntaggedDoriRegions;
+        public int LinkedRoomSources;
+    }
+
+    /// <summary>
+    /// Collects a plan view's generated coverage and rooms for the multi-camera audit (issue #6).
+    /// Read-only: nothing in the model is created, changed or deleted.
+    /// </summary>
+    public static class CoverageAudit
+    {
+        public static AuditData Collect(Document doc, ViewPlan view, double cutZ)
+        {
+            var data = new AuditData { ViewName = view.Name };
+
+            // Every filled region owned by the view, including hidden ones, so they can be counted
+            var regions = new FilteredElementCollector(doc)
+                .OfClass(typeof(FilledRegion))
+                .WhereElementIsNotElementType()
+                .Where(r => r.OwnerViewId == view.Id)
+                .ToList();
+
+            Dictionary<string, List<ElementId>> byCamera = ElementTagStorage.FindCoverageByCamera(doc, view);
+            var taggedIds = new HashSet<ElementId>(byCamera.Values.SelectMany(ids => ids));
+
+            foreach (Element region in regions)
+            {
+                string typeName = doc.GetElement(region.GetTypeId())?.Name;
+                DoriLevel level = CameraData.LevelForRegionType(typeName);
+                if (level == null) continue; // Not a DORI region
+
+                if (region.IsHidden(view)) { data.HiddenRegions++; continue; }
+                if (!taggedIds.Contains(region.Id)) { data.UntaggedDoriRegions++; continue; }
+            }
+
+            foreach (var group in byCamera)
+            {
+                Element camera = doc.GetElement(group.Key);
+                CoverageStatus status = CoverageStatus.Evaluate(doc, view, camera, group.Value);
+
+                var auditCamera = new AuditCamera
+                {
+                    UniqueId = group.Key,
+                    Label = CameraData.Describe(camera),
+                    State = status.State
+                };
+
+                XYZ position = CoverageSource.GetCameraPosition(camera);
+                if (position != null) auditCamera.Position = new PlanPoint(position.X, position.Y);
+                if (camera != null)
+                {
+                    PointCoverage.CameraValues values = PointCoverage.GetCameraValues(camera, view, status);
+                    auditCamera.FovDegrees = values.FovDegrees;
+                    auditCamera.Resolution = values.Resolution;
+                }
+                data.Cameras.Add(auditCamera);
+
+                foreach (ElementId id in group.Value)
+                {
+                    if (!(doc.GetElement(id) is FilledRegion region)) continue;
+                    DoriLevel level = CameraData.LevelForRegionType(doc.GetElement(region.GetTypeId())?.Name);
+                    if (level == null) continue;
+
+                    var auditRegion = new AuditRegion { CameraUniqueId = group.Key, LevelIndex = level.Index };
+                    foreach (CurveLoop loop in region.GetBoundaries())
+                        auditRegion.Loops.Add(Tessellate(loop.Cast<Curve>(), Transform.Identity));
+                    data.Regions.Add(auditRegion);
+                }
+            }
+
+            // Boundary lines (drawn or traced): what the coverage treats as blocking the view
+            var boundaryLines = new FilteredElementCollector(doc, view.Id)
+                .OfClass(typeof(CurveElement))
+                .WhereElementIsNotElementType()
+                .Cast<CurveElement>()
+                .Where(c => c.LineStyle?.Name == "Boundary");
+
+            foreach (CurveElement line in boundaryLines)
+            {
+                Curve curve = line.GeometryCurve;
+                if (curve == null) continue;
+
+                IList<XYZ> points;
+                try { points = curve.Tessellate(); }
+                catch { continue; }
+                if (points.Count >= 2)
+                    data.BoundaryLines.Add(points.Select(p => new PlanPoint(p.X, p.Y)).ToList());
+            }
+
+            CollectRooms(doc, Transform.Identity, cutZ, data);
+            foreach (RevitLinkInstance link in new FilteredElementCollector(doc, view.Id).OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>())
+            {
+                Document linkDoc = link.GetLinkDocument();
+                if (linkDoc == null) continue;
+                int before = data.Rooms.Count;
+                CollectRooms(linkDoc, link.GetTotalTransform(), cutZ, data);
+                if (data.Rooms.Count > before) data.LinkedRoomSources++;
+            }
+
+            return data;
+        }
+
+        // Rooms and MEP spaces whose height range contains the plan's cut plane, with their boundaries
+        // moved to the host. Both count as the area cameras should cover.
+        private static void CollectRooms(Document doc, Transform toHost, double cutZ, AuditData data)
+        {
+            var options = new SpatialElementBoundaryOptions();
+            var rooms = new FilteredElementCollector(doc)
+                .WherePasses(new ElementMulticategoryFilter(new List<BuiltInCategory> { BuiltInCategory.OST_Rooms, BuiltInCategory.OST_MEPSpaces }))
+                .WhereElementIsNotElementType()
+                .OfType<SpatialElement>()
+                .Where(r => r.Area > 0);
+
+            foreach (SpatialElement room in rooms)
+            {
+                BoundingBoxXYZ box = room.get_BoundingBox(null);
+                if (box == null) continue;
+
+                double minZ = toHost.OfPoint(box.Min).Z, maxZ = toHost.OfPoint(box.Max).Z;
+                if (cutZ < Math.Min(minZ, maxZ) - 1e-3 || cutZ > Math.Max(minZ, maxZ) + 1e-3) continue;
+
+                IList<IList<BoundarySegment>> boundary;
+                try { boundary = room.GetBoundarySegments(options); }
+                catch { continue; }
+                if (boundary == null || boundary.Count == 0) continue;
+
+                var loops = boundary
+                    .Select(segments => Tessellate(segments.Select(s => s.GetCurve()), toHost))
+                    .Where(loop => loop.Count >= 3)
+                    .ToList();
+                if (loops.Any()) data.Rooms.Add(loops);
+            }
+        }
+
+        private static List<PlanPoint> Tessellate(IEnumerable<Curve> curves, Transform toHost)
+        {
+            var points = new List<PlanPoint>();
+            foreach (Curve curve in curves)
+            {
+                IList<XYZ> tessellated;
+                try { tessellated = curve.Tessellate(); }
+                catch { continue; }
+
+                // Each curve's end is the next one's start; skip it to avoid duplicates
+                for (int i = 0; i < tessellated.Count - 1; i++)
+                {
+                    XYZ p = toHost.OfPoint(tessellated[i]);
+                    points.Add(new PlanPoint(p.X, p.Y));
+                }
+            }
+            return points;
+        }
+    }
+}

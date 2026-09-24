@@ -5,7 +5,8 @@
     xmlns:local="clr-namespace:Camera_FOV"
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
     Title="Camera FOV"
-    Width="332"
+    Width="384"
+    MinWidth="384"
     AllowsTransparency="True"
     Background="Transparent"
     SizeToContent="Height"
@@ -40,6 +41,30 @@
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         Orientation="Horizontal">
+                        <Button
+                            x:Name="CheckPointButton"
+                            Margin="0,0,2,0"
+                            AutomationProperties.Name="Check a point"
+                            Click="CheckPointButton_Click"
+                            Style="{StaticResource Button.Icon}"
+                            ToolTip="Check a point: pick a spot in the plan to see which cameras cover it, and how well">
+                            <materialDesign:PackIcon
+                                Width="16"
+                                Height="16"
+                                Kind="Crosshairs" />
+                        </Button>
+                        <Button
+                            x:Name="CoverageAuditButton"
+                            Margin="0,0,2,0"
+                            AutomationProperties.Name="Coverage audit"
+                            Click="CoverageAuditButton_Click"
+                            Style="{StaticResource Button.Icon}"
+                            ToolTip="Coverage audit: gaps and overlaps of all cameras in this view, per DORI level">
+                            <materialDesign:PackIcon
+                                Width="16"
+                                Height="16"
+                                Kind="MapSearchOutline" />
+                        </Button>
                         <Button
                             x:Name="CheckViewCoverageButton"
                             Margin="0,0,2,0"

@@ -1,0 +1,137 @@
+<Window
+    x:Class="Camera_FOV.UI.CoverageAuditWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:Camera_FOV"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Coverage audit"
+    Width="820"
+    Height="720"
+    AllowsTransparency="True"
+    Background="Transparent"
+    MinWidth="560"
+    MinHeight="520"
+    ResizeMode="CanResize"
+    TextOptions.TextFormattingMode="Display"
+    UseLayoutRounding="True"
+    WindowStartupLocation="CenterOwner"
+    WindowStyle="None"
+    mc:Ignorable="d">
+
+    <!--  Resizable from any edge, without a grip; the 16px margin around the surface is the shadow  -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome
+            CaptionHeight="0"
+            CornerRadius="0"
+            GlassFrameThickness="0"
+            ResizeBorderThickness="18"
+            UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/DarkTheme.xaml" />
+                <ResourceDictionary Source="Themes/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid
+        Margin="16"
+        TextElement.FontFamily="{StaticResource Font.Text}"
+        TextElement.FontSize="{StaticResource FontSize.Body}"
+        TextElement.Foreground="{DynamicResource Text.Primary}">
+        <Border Style="{StaticResource Window.Shadow}" />
+        <Border Style="{StaticResource Window.Surface}">
+            <DockPanel>
+                <local:TitleBar CanMinimize="False" DockPanel.Dock="Top" />
+
+                <!--  Level selector and options  -->
+                <StackPanel Margin="16,0,16,10" DockPanel.Dock="Top">
+                    <Border Style="{StaticResource Segmented}">
+                        <UniformGrid x:Name="LevelSelector" Columns="5">
+                            <RadioButton Checked="Level_Checked" Content="Detection" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="0" />
+                            <RadioButton Checked="Level_Checked" Content="Observation" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="1" />
+                            <RadioButton Checked="Level_Checked" Content="Recognition" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="2" />
+                            <RadioButton Checked="Level_Checked" Content="Identification" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="3" />
+                            <RadioButton Checked="Level_Checked" Content="Best level" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-1" />
+                        </UniformGrid>
+                    </Border>
+                    <CheckBox
+                        x:Name="IncludeOutdatedCheckBox"
+                        Margin="0,10,0,0"
+                        Checked="Options_Changed"
+                        Style="{StaticResource Input.Check}"
+                        Unchecked="Options_Changed">
+                        <TextBlock Style="{StaticResource Type.Body}" Text="Include coverage that is out of date or needs review" />
+                    </CheckBox>
+                </StackPanel>
+
+                <!--  Summary, legend and the clicked point  -->
+                <Border
+                    Padding="16,10,16,14"
+                    BorderBrush="{DynamicResource Separator}"
+                    BorderThickness="0,1,0,0"
+                    DockPanel.Dock="Bottom">
+                    <StackPanel>
+                        <WrapPanel x:Name="LegendPanel" Margin="0,0,0,6" />
+                        <TextBlock
+                            x:Name="SummaryText"
+                            Style="{StaticResource Type.Body}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="SourcesText"
+                            Margin="0,4,0,0"
+                            Style="{StaticResource Type.Caption}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="PointText"
+                            Margin="0,8,0,0"
+                            Style="{StaticResource Type.Secondary}"
+                            Text="Click the map to drop a pin and see which cameras cover that spot. Scroll to zoom, hold the wheel to pan, double-click it to zoom out."
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            Style="{StaticResource Type.Caption}"
+                            Text="Based on the drawn coverage in plan: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!--  The map: vector coverage, outlines, Boundary lines and cameras, scaled to fit.
+                      Wheel zooms at the cursor, holding the wheel pans, double-clicking it resets.  -->
+                <Border
+                    x:Name="MapFrame"
+                    Margin="16,0,16,12"
+                    Background="{DynamicResource Surface.Inset}"
+                    BorderBrush="{DynamicResource Surface.Stroke}"
+                    BorderThickness="1"
+                    ClipToBounds="True"
+                    CornerRadius="8"
+                    MouseDown="MapFrame_MouseDown"
+                    MouseMove="MapFrame_MouseMove"
+                    MouseUp="MapFrame_MouseUp"
+                    MouseWheel="MapFrame_MouseWheel">
+                    <Viewbox Margin="8" Stretch="Uniform">
+                        <Grid x:Name="MapHost">
+                            <Canvas
+                                x:Name="MapCanvas"
+                                Background="Transparent"
+                                Cursor="Cross"
+                                MouseLeftButtonDown="MapCanvas_MouseLeftButtonDown">
+                                <Canvas.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="MapZoom" />
+                                        <TranslateTransform x:Name="MapPan" />
+                                    </TransformGroup>
+                                </Canvas.RenderTransform>
+                            </Canvas>
+                        </Grid>
+                    </Viewbox>
+                </Border>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
