@@ -206,12 +206,23 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="18" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Style="{StaticResource Type.Body}" Text="Angle" />
+                                <Button
+                                    x:Name="ToggleRotationSignButton"
+                                    Grid.Column="1"
+                                    MinWidth="32"
+                                    Margin="0,0,6,0"
+                                    AutomationProperties.Name="Toggle rotation sign"
+                                    Click="ToggleRotationSign_Click"
+                                    Content="±"
+                                    Style="{StaticResource Button.Small}"
+                                    ToolTip="Switch the angle between positive and negative" />
                                 <TextBox
                                     x:Name="RotationAngleTextBox"
-                                    Grid.Column="1"
+                                    Grid.Column="2"
                                     MinWidth="88"
                                     AutomationProperties.Name="Rotation angle in degrees"
                                     Style="{StaticResource Input.Value}"
@@ -219,7 +230,7 @@
                                     TextChanged="RotationAngleTextBox_TextChanged"
                                     ToolTip="Rotation added to the camera's own orientation, in degrees" />
                                 <TextBlock
-                                    Grid.Column="2"
+                                    Grid.Column="3"
                                     Style="{StaticResource Type.Unit}"
                                     Text="°" />
                             </Grid>

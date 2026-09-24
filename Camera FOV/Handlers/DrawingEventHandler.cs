@@ -225,28 +225,7 @@ namespace Camera_FOV.Handlers
                     break;
 
                 case DrawingAction.DrawFilledRegion:
-                    // Update camera parameter if element is provided
-                    if (_cameraElement != null)
-                    {
-                        UpdateCameraParameter();
-                    }
-
-                    if (_doriLayers != null && _doriLayers.Any())
-                    {
-                        _lastBatchCreatedIds.Clear();
-                        foreach (var layer in _doriLayers)
-                        {
-                            ElementId id = DrawLayer(layer.Distance, layer.TypeId, layer.DrawDimension);
-                            if (id != ElementId.InvalidElementId) _lastBatchCreatedIds.Add(id);
-                        }
-                    }
-                    else
-                    {
-                        // Fallback single mode
-                        ElementId id = DrawLayer(_maxDistance, _filledRegionTypeId, _drawAngularDimension);
-                        _lastBatchCreatedIds.Clear();
-                        if (id != ElementId.InvalidElementId) _lastBatchCreatedIds.Add(id);
-                    }
+                    DrawCoverage();
                     break;
 
 
@@ -255,13 +234,9 @@ namespace Camera_FOV.Handlers
                     break;
 
                 case DrawingAction.UndoFilledRegion:
-                     if (_lastBatchCreatedIds != null && _lastBatchCreatedIds.Any())
+                    if (_lastBatchCreatedIds != null && _lastBatchCreatedIds.Any())
                     {
-                        foreach (var id in _lastBatchCreatedIds)
-                        {
-                            _drawingTools.DeleteElement(id);
-                        }
-                        _lastBatchCreatedIds.Clear();
+                        UndoLastCoverage();
                     }
                     else
                     {
@@ -1378,18 +1353,129 @@ namespace Camera_FOV.Handlers
         }
     }
 
-    private ElementId DrawLayer(double distance, ElementId typeId, bool drawDimension)
+    // Draws every selected DORI level as one operation: the new regions are created first and the
+    // camera's previous coverage is removed only once all of them succeeded. Any failure rolls the
+    // whole group back, so the camera keeps exactly the coverage (and parameters) it had. A success
+    // becomes a single Revit undo step.
+    private void DrawCoverage()
     {
         Document doc = _drawingTools.Document;
         View view = _drawingTools.View;
 
-        // Replace the coverage previously drawn for this camera + DORI type in this view.
-        // The association is stored on the region itself, so it survives reopening the
-        // window or the project. Untagged regions from older versions are never deleted.
-        foreach (ElementId oldRegionId in ElementTagStorage.FindCoverageRegions(doc, view, _cameraElement, typeId))
+        List<DoriLayerConfig> layers = _doriLayers != null && _doriLayers.Any()
+            ? _doriLayers.ToList()
+            : new List<DoriLayerConfig> { new DoriLayerConfig { Distance = _maxDistance, TypeId = _filledRegionTypeId, DrawDimension = _drawAngularDimension } };
+
+        // Checked before anything changes, so a missing type never costs existing coverage
+        List<DoriLayerConfig> missingTypes = layers.Where(l => l.TypeId == null || !(doc.GetElement(l.TypeId) is FilledRegionType)).ToList();
+        if (missingTypes.Any())
         {
-            _drawingTools.DeleteElement(oldRegionId);
+            MessageDialog.ShowWarning(
+                "Can’t draw the coverage",
+                "A DORI filled region type is missing from the project, so nothing was changed. Open Settings and click Create DORI region types, then draw again.");
+            return;
         }
+
+        // The association is stored on the regions themselves, so it survives reopening the window
+        // or the project. Collected before drawing, because the new regions carry the same tags.
+        // Untagged regions from older versions are never deleted.
+        List<ElementId> previousCoverage = layers
+            .SelectMany(l => ElementTagStorage.FindCoverageRegions(doc, view, _cameraElement, l.TypeId))
+            .Distinct()
+            .ToList();
+
+        var created = new List<ElementId>();
+
+        using (TransactionGroup group = new TransactionGroup(doc, "Draw Camera Coverage"))
+        {
+            try
+            {
+                group.Start();
+
+                if (_cameraElement != null)
+                    UpdateCameraParameter();
+
+                foreach (DoriLayerConfig layer in layers)
+                {
+                    ElementId id = DrawLayer(layer.Distance, layer.TypeId, layer.DrawDimension);
+                    if (id == ElementId.InvalidElementId)
+                    {
+                        group.RollBack();
+                        MessageDialog.Show(
+                            MessageDialog.Kind.Warning,
+                            $"Couldn’t draw the {DescribeLayer(doc, layer.TypeId)} coverage",
+                            "Nothing was changed: the camera keeps its previous coverage. This usually happens when Boundary lines create a very complex or self-intersecting shape near the camera. Tidy the Boundary lines around the camera, or move Region resolution towards Faster in Settings, then draw again.",
+                            details: _drawingTools.LastFailure);
+                        return;
+                    }
+                    created.Add(id);
+                }
+
+                if (previousCoverage.Any())
+                {
+                    using (Transaction transaction = new Transaction(doc, "Remove Previous Coverage"))
+                    {
+                        transaction.Start();
+                        doc.Delete(previousCoverage.Where(id => doc.GetElement(id) != null).ToList());
+                        if (transaction.Commit() != TransactionStatus.Committed)
+                            throw new InvalidOperationException("Removing the previous coverage could not be committed.");
+                    }
+                }
+
+                if (group.Assimilate() != TransactionStatus.Committed)
+                    throw new InvalidOperationException("The coverage could not be committed.");
+            }
+            catch (Exception ex)
+            {
+                if (group.HasStarted() && !group.HasEnded())
+                    group.RollBack();
+
+                MessageDialog.ShowError(
+                    "Couldn’t draw the coverage",
+                    "Revit reported an error, so nothing was changed: the camera keeps its previous coverage.",
+                    ex);
+                return;
+            }
+        }
+
+        _lastBatchCreatedIds = created;
+    }
+
+    // Removes the regions of the last successful draw in one step. The coverage they replaced is
+    // not restored here; Revit's own Undo does that.
+    private void UndoLastCoverage()
+    {
+        Document doc = _drawingTools.Document;
+        List<ElementId> existing = _lastBatchCreatedIds.Where(id => doc.GetElement(id) != null).ToList();
+
+        if (existing.Any())
+        {
+            using (Transaction transaction = new Transaction(doc, "Undo Camera Coverage"))
+            {
+                transaction.Start();
+                doc.Delete(existing);
+                transaction.Commit();
+            }
+        }
+
+        _lastBatchCreatedIds.Clear();
+    }
+
+    // "Detection", "Observation", … for the plugin's region types, otherwise the type name.
+    private static string DescribeLayer(Document doc, ElementId typeId)
+    {
+        string name = doc.GetElement(typeId)?.Name ?? "DORI";
+        if (name.Contains("dori_25px")) return "Detection";
+        if (name.Contains("dori_63px")) return "Observation";
+        if (name.Contains("dori_125px")) return "Recognition";
+        if (name.Contains("dori_250px")) return "Identification";
+        return name;
+    }
+
+    // Creates one tagged region in its own transaction; the caller decides what to replace.
+    private ElementId DrawLayer(double distance, ElementId typeId, bool drawDimension)
+    {
+        View view = _drawingTools.View;
 
         _drawingTools.SetParameters(_position, distance, _rotationAngle, _fovAngle, typeId);
         ElementId newRegionId = _drawingTools.DrawFilledRegion( // Use slider resolution

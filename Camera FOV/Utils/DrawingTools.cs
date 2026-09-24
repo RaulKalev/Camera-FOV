@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Autodesk.Revit.UI;
-using Camera_FOV.UI;
 
 
 namespace Camera_FOV.Utils
@@ -135,16 +134,20 @@ namespace Camera_FOV.Utils
             DrawDetailLine();
         }
 
+        // Why the last DrawFilledRegion call returned InvalidElementId, for the caller to report.
+        public string LastFailure { get; private set; }
+
         // onCreated runs inside the creating transaction, so anything it writes commits with the region.
+        // On failure nothing is committed, InvalidElementId is returned and LastFailure says why.
         public ElementId DrawFilledRegion(double resolution, Action<FilledRegion> onCreated = null)
         {
+            LastFailure = null;
+
             if (_currentPosition == null || _filledRegionTypeId == null)
             {
-                MessageDialog.ShowWarning(
-                    "Can’t draw this DORI level",
-                    _currentPosition == null
-                        ? "No camera position is set. Select a camera and draw again."
-                        : "Its filled region type is missing from the project. Open Settings and click Create DORI region types.");
+                LastFailure = _currentPosition == null
+                    ? "No camera position is set."
+                    : "The filled region type is missing from the project.";
                 return ElementId.InvalidElementId;
             }
 
@@ -282,11 +285,9 @@ namespace Camera_FOV.Utils
             }
 
             // If all attempts fail
-            MessageDialog.Show(
-                MessageDialog.Kind.Warning,
-                "Couldn’t draw the coverage region",
-                "Revit rejected the coverage outline at every resolution tried. This usually happens when Boundary lines create a very complex or self-intersecting shape near the camera. Simplify or tidy the Boundary lines around the camera, or move Region resolution towards Faster in Settings, then draw again.",
-                details: lastError);
+            LastFailure = string.IsNullOrWhiteSpace(lastError)
+                ? "Revit rejected the coverage outline at every resolution tried."
+                : $"Revit rejected the coverage outline at every resolution tried. Last error: {lastError}";
             return ElementId.InvalidElementId;
         }
 

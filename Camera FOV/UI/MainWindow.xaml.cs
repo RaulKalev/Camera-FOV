@@ -307,6 +307,8 @@ namespace Camera_FOV
                 && resolution > 0;
         }
 
+        // Intentionally custom: derived from and validated against Axis Site Designer results, whose
+        // distances it matches. Do not replace it with textbook lens geometry (see issue #2).
         private decimal CalculateDORIDistance(int resolution, decimal fov, decimal ppm)
         {
             decimal A = resolution / ppm;
@@ -950,6 +952,17 @@ namespace Camera_FOV
         public void NotifyFilledRegionsCreated()
         {
             // FilledRegionComboBox logic removed.
+        }
+
+        // Flips the sign of the angle as typed; changing the text updates the preview like typing does.
+        private void ToggleRotationSign_Click(object sender, RoutedEventArgs e)
+        {
+            string text = RotationAngleTextBox.Text.Trim();
+
+            if (text.StartsWith("-") || text.StartsWith("−"))
+                RotationAngleTextBox.Text = text.Substring(1);
+            else if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out double value) && value != 0)
+                RotationAngleTextBox.Text = "-" + text;
         }
 
         private void PlusFourFiveDegree_Click(object sender, RoutedEventArgs e) => UpdateRotationAngle(45);
