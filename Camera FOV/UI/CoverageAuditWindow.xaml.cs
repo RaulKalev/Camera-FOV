@@ -1,3 +1,4 @@
+using Camera_FOV.Models;
 using Camera_FOV.Services;
 using System;
 using System.Collections.Generic;
@@ -15,7 +16,8 @@ namespace Camera_FOV.UI
     /// at a time or as the best level reached, against the rooms at the plan's cut height: uncovered,
     /// single-covered and overlapping areas. The map is drawn as vector geometry, so edges stay smooth
     /// at any zoom; a grid of the same data measures the areas. Works on plain data collected
-    /// beforehand, so it never touches the model.
+    /// beforehand, so it never touches the model. The IEC categories mode (issue #12) instead works out
+    /// the observation categories of IEC 62676-4:2026 from the cameras and Boundary lines themselves.
     /// </summary>
     public partial class CoverageAuditWindow : Window
     {
@@ -28,16 +30,33 @@ namespace Camera_FOV.UI
         private double _minX, _minY, _cell; // Grid origin and cell size, in feet
         private int _width, _height;
         private bool[] _inRoom;
-        private int _level = -1; // DORI level index, or -1 for the best level
+        private int _level = -1; // DORI level index, -1 for the best level, or CategoryMode
+
+        // The IEC 62676-4:2026 observation categories (issue #12), worked out from the cameras and
+        // Boundary lines rather than the drawn regions. Cast when first shown, again if the formula changes.
+        private const int CategoryMode = -2;
+        private bool ShowingCategories => _level == CategoryMode;
+        private List<CameraSight> _sights;
+        private List<List<PlanPoint>> _sightOutlines; // Each sight's Overview outline
+        private List<AuditCamera> _skipped;
+        private PixelDensityFormula _sightFormula;
 
         private static readonly Color Uncovered = Color.FromRgb(0xE5, 0x48, 0x4D);
         private static readonly Color Single = Color.FromRgb(0x30, 0xB0, 0x5C);
         private static readonly Color Overlap = Color.FromRgb(0x3E, 0x8E, 0xF7);
         private static readonly Color BoundaryLine = Color.FromRgb(0x2E, 0xD1, 0x5E);
+        private static readonly Color CategoryBoundaryLine = Color.FromRgb(0xFF, 0x4F, 0xD8); // Stands out from the green category ramp
         private static readonly Color[] LevelColors =
         {
             Color.FromRgb(0xF2, 0x8B, 0x82), Color.FromRgb(0xFD, 0xD6, 0x63),
             Color.FromRgb(0x8A, 0xB4, 0xF8), Color.FromRgb(0x81, 0xC9, 0x95)
+        };
+        // Overview to Scrutinise: one ordered ramp, light for the lowest density
+        private static readonly Color[] CategoryColors =
+        {
+            Color.FromRgb(0xFD, 0xE7, 0x25), Color.FromRgb(0xB5, 0xDE, 0x2B), Color.FromRgb(0x6E, 0xCE, 0x58),
+            Color.FromRgb(0x35, 0xB7, 0x79), Color.FromRgb(0x1F, 0x9E, 0x89), Color.FromRgb(0x26, 0x82, 0x8E),
+            Color.FromRgb(0x3E, 0x4A, 0x89)
         };
 
         // Overlays whose on-screen size stays constant while zooming: element → base size factor
@@ -55,7 +74,16 @@ namespace Camera_FOV.UI
             Title = $"Coverage audit · {data.ViewName}";
 
             SetUpGrid();
-            ((RadioButton)LevelSelector.Children[LevelSelector.Children.Count - 1]).IsChecked = true; // Opens on Best level
+            LevelSelector.Children.OfType<RadioButton>().First(b => b.Tag?.ToString() == "-1").IsChecked = true; // Opens on Best level
+        }
+
+        private void EnsureSights()
+        {
+            if (_sights != null && _sightFormula == CameraData.CurrentFormula) return;
+
+            _sightFormula = CameraData.CurrentFormula;
+            _sights = CategoryCoverage.Cast(_data, _sightFormula, SettingsManager.Settings.Resolution, out _skipped);
+            _sightOutlines = _sights.Select(s => s.Outline(CameraData.Categories[0].PixelsPerMeter)).ToList();
         }
 
         private IEnumerable<AuditRegion> IncludedRegions()
@@ -79,6 +107,7 @@ namespace Camera_FOV.UI
         {
             var points = _data.Regions.SelectMany(r => r.Loops).SelectMany(l => l)
                 .Concat(_data.Rooms.SelectMany(room => room).SelectMany(l => l))
+                .Concat(_data.BoundaryLines.SelectMany(l => l))
                 .Concat(_data.Cameras.Where(c => c.Position.HasValue).Select(c => c.Position.Value))
                 .ToList();
 
@@ -125,10 +154,26 @@ namespace Camera_FOV.UI
 
         private void Redraw()
         {
-            List<AuditRegion> regions = IncludedRegions().ToList();
-            MeasureAreas(regions);
-            DrawMap(regions);
-            ShowSources();
+            // The category mode is worked out from the cameras themselves, so drawn coverage being out of date doesn't matter
+            IncludeOutdatedCheckBox.IsEnabled = !ShowingCategories;
+            BasisText.Text = ShowingCategories
+                ? "Worked out in plan from each camera’s position, direction, field of view and resolution: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed."
+                : "Based on the drawn coverage in plan: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed.";
+
+            if (ShowingCategories)
+            {
+                EnsureSights();
+                MeasureCategoryAreas();
+                DrawCategoryMap();
+                ShowCategorySources();
+            }
+            else
+            {
+                List<AuditRegion> regions = IncludedRegions().ToList();
+                MeasureAreas(regions);
+                DrawMap(regions);
+                ShowSources();
+            }
 
             // Keep the pin and refresh what covers it at the newly shown level
             DrawPin();
@@ -201,18 +246,74 @@ namespace Camera_FOV.UI
             }
         }
 
+        // Every grid cell takes the highest density of any camera that sees it, then the category that density reaches
+        private void MeasureCategoryAreas()
+        {
+            int cells = _width * _height;
+            double cellArea = _cell * _cell * 0.09290304; // ft² → m²
+            var best = new double[cells];
+
+            for (int s = 0; s < _sights.Count; s++)
+            {
+                CameraSight sight = _sights[s];
+                PlanPoint camera = sight.Camera.Position.Value;
+                Fill(new List<List<PlanPoint>> { _sightOutlines[s] }, index =>
+                {
+                    PlanPoint centre = CellCentre(index);
+                    double dx = centre.X - camera.X, dy = centre.Y - camera.Y;
+                    double density = sight.PixelsPerMeterAt(Math.Sqrt(dx * dx + dy * dy) * 0.3048);
+                    if (density > best[index]) best[index] = density;
+                });
+            }
+
+            var areas = new double[CameraData.Categories.Count + 1]; // 0 = below Overview or not seen, otherwise index + 1
+            double roomArea = 0;
+            for (int i = 0; i < cells; i++)
+            {
+                if (!_inRoom[i]) continue;
+                roomArea += cellArea;
+                areas[(CameraData.CategoryFor(best[i])?.Index ?? -1) + 1] += cellArea;
+            }
+
+            if (_data.Rooms.Any())
+            {
+                double high = CameraData.Categories.Where(c => c.HighDensity).Sum(c => areas[c.Index + 1]);
+                SummaryText.Text = "Best category in rooms: " +
+                    string.Join(", ", CameraData.Categories.Reverse().Select(c => $"{c.Name} {Percent(areas[c.Index + 1], roomArea)}")) +
+                    $", below Overview or unseen {Percent(areas[0], roomArea)} of {roomArea:0} m². " +
+                    $"Perceive or better (high pixel density) {Percent(high, roomArea)}.";
+            }
+            else
+            {
+                SummaryText.Text = "Best category any camera reaches. No rooms or spaces were found at this plan’s cut height, so areas can’t be measured.";
+            }
+
+            SetLegend(CameraData.Categories.Reverse().Select(c => ($"{c.Name} {c.PixelsPerMeter:0} px/m", CategoryColors[c.Index]))
+                .Concat(new[] { ("Uncovered (in rooms)", Uncovered), ("Boundary line", CategoryBoundaryLine) }).ToArray());
+        }
+
+        private PlanPoint CellCentre(int index)
+        {
+            int row = index / _width, col = index % _width;
+            return new PlanPoint(_minX + (col + 0.5) * _cell, _minY + (_height - 1 - row + 0.5) * _cell);
+        }
+
         // ------------------------------------------------------------------
         // The map, drawn as vector geometry
         // ------------------------------------------------------------------
 
-        private void DrawMap(List<AuditRegion> regions)
+        private void ClearMap()
         {
             MapCanvas.Children.Clear();
             _lines.Clear();
             _markers.Clear();
             _pinShape = null;
             _pinLabel = null;
+        }
 
+        private void DrawMap(List<AuditRegion> regions)
+        {
+            ClearMap();
             Geometry rooms = Union(_data.Rooms.Select(ToGeometry));
 
             if (_level >= 0)
@@ -252,6 +353,12 @@ namespace Camera_FOV.UI
                     AddLine(ToGeometry(region.Loops), LevelColors[region.LevelIndex], 1);
             }
 
+            DrawOverlays(rooms);
+        }
+
+        // Rooms, Boundary lines and cameras over the coverage
+        private void DrawOverlays(Geometry rooms)
+        {
             // Outside the rooms, dim the coverage so the rooms stand out
             if (rooms != null)
             {
@@ -266,7 +373,7 @@ namespace Camera_FOV.UI
 
             // Obstructions, as the coverage sees them
             foreach (List<PlanPoint> line in _data.BoundaryLines)
-                AddLine(ToPolyline(line), BoundaryLine, 1.4);
+                AddLine(ToPolyline(line), ShowingCategories ? CategoryBoundaryLine : BoundaryLine, 1.4);
 
             foreach (AuditCamera camera in _data.Cameras.Where(c => c.Position.HasValue))
                 AddCamera(camera);
@@ -274,10 +381,39 @@ namespace Camera_FOV.UI
             ApplyZoomToOverlays();
         }
 
-        private void AddFill(Geometry geometry, Color color)
+        // Lowest category first, so each spot shows the best category any camera reaches there. The
+        // bands can reach far past the plan, so they are clipped to the map.
+        private void DrawCategoryMap()
+        {
+            ClearMap();
+            Geometry rooms = Union(_data.Rooms.Select(ToGeometry));
+            var map = new RectangleGeometry(new Rect(0, 0, _width, _height));
+            map.Freeze();
+
+            foreach (ObservationCategory category in CameraData.Categories)
+            {
+                foreach (CameraSight sight in _sights)
+                    AddFill(ToGeometry(new List<List<PlanPoint>> { sight.Outline(category.PixelsPerMeter) }), CategoryColors[category.Index], map);
+            }
+
+            List<Geometry> seen = _sightOutlines.Select(o => ToGeometry(new List<List<PlanPoint>> { o })).ToList();
+            Geometry covered = Union(seen);
+            if (rooms != null) AddFill(covered != null ? Geometry.Combine(rooms, covered, GeometryCombineMode.Exclude, null) : rooms, Uncovered);
+
+            foreach (Geometry outline in seen)
+            {
+                var path = new Path { Data = outline, Clip = map, Stroke = new SolidColorBrush(Color.FromArgb(150, 0xE8, 0xE8, 0xEC)), StrokeLineJoin = PenLineJoin.Round, IsHitTestVisible = false };
+                MapCanvas.Children.Add(path);
+                _lines.Add((path, 1));
+            }
+
+            DrawOverlays(rooms);
+        }
+
+        private void AddFill(Geometry geometry, Color color, Geometry clip = null)
         {
             if (geometry == null || geometry.IsEmpty()) return;
-            MapCanvas.Children.Add(new Path { Data = geometry, Fill = new SolidColorBrush(Color.FromArgb(225, color.R, color.G, color.B)), IsHitTestVisible = false });
+            MapCanvas.Children.Add(new Path { Data = geometry, Clip = clip, Fill = new SolidColorBrush(Color.FromArgb(225, color.R, color.G, color.B)), IsHitTestVisible = false });
         }
 
         private void AddLine(Geometry geometry, Color color, double thickness)
@@ -299,16 +435,30 @@ namespace Camera_FOV.UI
         private void AddCamera(AuditCamera camera)
         {
             Point center = ToCanvas(camera.Position.Value);
-            bool current = camera.State == CoverageState.Current;
+
+            // The category mode uses every camera it has values for; the other modes only up-to-date drawn coverage
+            string fill, note;
+            if (ShowingCategories)
+            {
+                bool used = CategoryCoverage.CanSee(camera);
+                fill = used ? "Text.Primary" : "Status.Warning";
+                note = used ? string.Empty : " (no field of view, resolution or direction: left out)";
+            }
+            else
+            {
+                fill = camera.State == CoverageState.Current ? "Text.Primary" : camera.State == CoverageState.None ? "Text.Tertiary" : "Status.Warning";
+                note = camera.State == CoverageState.Current ? string.Empty : $" ({DescribeState(camera.State)})";
+            }
+
             var dot = new Ellipse
             {
                 Width = 8,
                 Height = 8,
-                Fill = current ? (Brush)FindResource("Text.Primary") : (Brush)FindResource("Status.Warning"),
+                Fill = (Brush)FindResource(fill),
                 Stroke = (Brush)FindResource("Surface.Inset"),
                 StrokeThickness = 1.2,
                 RenderTransformOrigin = new Point(0.5, 0.5),
-                ToolTip = camera.Label + (current ? string.Empty : $" ({DescribeState(camera.State)})")
+                ToolTip = camera.Label + note
             };
             Canvas.SetLeft(dot, center.X - 4);
             Canvas.SetTop(dot, center.Y - 4);
@@ -511,6 +661,14 @@ namespace Camera_FOV.UI
         // The highest density any included camera reaches at the spot, at the shown level
         private string DescribePinDensity(PlanPoint point)
         {
+            if (ShowingCategories)
+            {
+                var sees = SightsAt(point);
+                if (!sees.Any()) return "Not seen";
+                ObservationCategory category = CameraData.CategoryFor(sees[0].Density);
+                return category != null ? $"{category.Name} · {sees[0].Density:0} px/m" : $"{sees[0].Density:0} px/m";
+            }
+
             var hits = HitsAt(point);
             double best = -1;
             foreach (var hit in hits)
@@ -543,8 +701,49 @@ namespace Camera_FOV.UI
             return CameraData.PixelsPerMeter(camera.Resolution.Value, camera.FovDegrees.Value, meters);
         }
 
+        // The cameras that see the spot, best density first: inside the area seen at Overview or better
+        private List<(CameraSight Sight, double Meters, double Density)> SightsAt(PlanPoint point)
+        {
+            var result = new List<(CameraSight, double, double)>();
+            for (int s = 0; s < _sights.Count; s++)
+            {
+                if (!Contains(new List<List<PlanPoint>> { _sightOutlines[s] }, point)) continue;
+
+                PlanPoint camera = _sights[s].Camera.Position.Value;
+                double dx = point.X - camera.X, dy = point.Y - camera.Y;
+                double meters = Math.Sqrt(dx * dx + dy * dy) * 0.3048;
+                result.Add((_sights[s], meters, _sights[s].PixelsPerMeterAt(meters)));
+            }
+            return result.OrderByDescending(r => r.Item3).ToList();
+        }
+
+        private void ShowCategoryPoint(PlanPoint point)
+        {
+            var sees = SightsAt(point);
+            if (!sees.Any())
+            {
+                PointText.Text = $"No camera sees this spot at {CameraData.Categories[0].Name} ({CameraData.Categories[0].PixelsPerMeter:0} px/m) or better.";
+                return;
+            }
+
+            var lines = sees.Select(s =>
+            {
+                ObservationCategory category = CameraData.CategoryFor(s.Density);
+                return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Meters:0.0} m";
+            });
+
+            string heading = sees.Count == 1 ? "1 camera sees this spot" : $"{sees.Count} cameras see this spot";
+            PointText.Text = heading + ":\n" + string.Join("\n", lines);
+        }
+
         private void ShowPoint(PlanPoint point)
         {
+            if (ShowingCategories)
+            {
+                ShowCategoryPoint(point);
+                return;
+            }
+
             var hits = HitsAt(point);
 
             if (!hits.Any())
@@ -583,8 +782,10 @@ namespace Camera_FOV.UI
             int outdated = _data.Cameras.Count(c => c.State == CoverageState.Stale || c.State == CoverageState.NeedsReview);
             int untracked = _data.Cameras.Count(c => c.State == CoverageState.Unknown);
             int deleted = _data.Cameras.Count(c => c.State == CoverageState.CameraMissing);
+            int undrawn = _data.Cameras.Count(c => c.State == CoverageState.None);
 
             var parts = new List<string> { $"{current} cameras with up-to-date coverage" };
+            if (undrawn > 0) parts.Add($"{undrawn} without drawn coverage");
             if (outdated > 0) parts.Add($"{outdated} out of date or needing review");
             if (untracked > 0) parts.Add($"{untracked} drawn by an older version");
             if (deleted > 0) parts.Add($"{deleted} deleted cameras’ leftover coverage (never included)");
@@ -599,10 +800,23 @@ namespace Camera_FOV.UI
             SourcesText.Text = string.Join(" · ", parts) + ". " + includedNote + rooms;
         }
 
+        private void ShowCategorySources()
+        {
+            string text = $"Worked out from {_sights.Count} cameras and the view’s Boundary lines with the {CameraData.FormulaName(_sightFormula)} pixel density formula, " +
+                          "not from the drawn DORI regions, so cameras count whether or not their coverage is drawn or up to date.";
+            if (_skipped.Any())
+                text += $" Left out, with no field of view, resolution or direction: {string.Join(", ", _skipped.Select(c => c.Label))}.";
+            if (_data.LinkedRoomSources > 0)
+                text += $" Rooms include {_data.LinkedRoomSources} linked models.";
+
+            SourcesText.Text = text;
+        }
+
         private static string DescribeState(CoverageState state)
         {
             switch (state)
             {
+                case CoverageState.None: return "no coverage drawn";
                 case CoverageState.Stale: return "coverage out of date";
                 case CoverageState.NeedsReview: return "needs review";
                 case CoverageState.Unknown: return "drawn by an older version";

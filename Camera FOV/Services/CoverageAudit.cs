@@ -25,6 +25,7 @@ namespace Camera_FOV.Services
         public PlanPoint? Position;
         public int? Resolution;
         public double? FovDegrees;
+        public double? AimDegrees; // Plan direction the camera faces, in degrees
         public CoverageState State;
     }
 
@@ -49,7 +50,7 @@ namespace Camera_FOV.Services
     }
 
     /// <summary>
-    /// Collects a plan view's generated coverage and rooms for the multi-camera audit (issue #6).
+    /// Collects a plan view's generated coverage, cameras and rooms for the multi-camera audit (issue #6).
     /// Read-only: nothing in the model is created, changed or deleted.
     /// </summary>
     public static class CoverageAudit
@@ -92,12 +93,7 @@ namespace Camera_FOV.Services
 
                 XYZ position = CoverageSource.GetCameraPosition(camera);
                 if (position != null) auditCamera.Position = new PlanPoint(position.X, position.Y);
-                if (camera != null)
-                {
-                    PointCoverage.CameraValues values = PointCoverage.GetCameraValues(camera, view, status);
-                    auditCamera.FovDegrees = values.FovDegrees;
-                    auditCamera.Resolution = values.Resolution;
-                }
+                if (camera != null) ReadCameraValues(camera, view, status, auditCamera);
                 data.Cameras.Add(auditCamera);
 
                 foreach (ElementId id in group.Value)
@@ -111,6 +107,28 @@ namespace Camera_FOV.Services
                         auditRegion.Loops.Add(Tessellate(loop.Cast<Curve>(), Transform.Identity));
                     data.Regions.Add(auditRegion);
                 }
+            }
+
+            // Cameras with no coverage drawn in this view: the category mode works them out from their
+            // parameters (issue #12), the same cameras the point check considers
+            var withoutCoverage = new FilteredElementCollector(doc, view.Id)
+                .OfCategory(BuiltInCategory.OST_SecurityDevices)
+                .WhereElementIsNotElementType()
+                .Where(e => CameraData.IsCamera(e) && !byCamera.ContainsKey(e.UniqueId));
+
+            foreach (Element camera in withoutCoverage)
+            {
+                var auditCamera = new AuditCamera
+                {
+                    UniqueId = camera.UniqueId,
+                    Label = CameraData.Describe(camera),
+                    State = CoverageState.None
+                };
+
+                XYZ position = CoverageSource.GetCameraPosition(camera);
+                if (position != null) auditCamera.Position = new PlanPoint(position.X, position.Y);
+                ReadCameraValues(camera, view, null, auditCamera);
+                data.Cameras.Add(auditCamera);
             }
 
             // Boundary lines (drawn or traced): what the coverage treats as blocking the view
@@ -143,6 +161,14 @@ namespace Camera_FOV.Services
             }
 
             return data;
+        }
+
+        private static void ReadCameraValues(Element camera, View view, CoverageStatus status, AuditCamera auditCamera)
+        {
+            PointCoverage.CameraValues values = PointCoverage.GetCameraValues(camera, view, status);
+            auditCamera.FovDegrees = values.FovDegrees;
+            auditCamera.Resolution = values.Resolution;
+            auditCamera.AimDegrees = values.AimDegrees;
         }
 
         // Rooms and MEP spaces whose height range contains the plan's cut plane, with their boundaries

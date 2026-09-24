@@ -24,6 +24,23 @@ namespace Camera_FOV.Services
         }
     }
 
+    /// <summary>An observation category of EVS-EN IEC 62676-4:2026 (O2DCPVS) and the pixel density it needs.</summary>
+    public sealed class ObservationCategory
+    {
+        public int Index { get; }
+        public string Name { get; }
+        public bool HighDensity { get; } // HPDO rather than LPDO
+        public double PixelsPerMeter { get; }
+
+        public ObservationCategory(int index, string name, bool highDensity, double pixelsPerMeter)
+        {
+            Index = index;
+            Name = name;
+            HighDensity = highDensity;
+            PixelsPerMeter = pixelsPerMeter;
+        }
+    }
+
     /// <summary>
     /// Camera values and pixel density shared by the drawing, the point check (issue #7) and the
     /// coverage audit (issue #6). Pixel density and DORI distance are the same relation solved either
@@ -39,6 +56,24 @@ namespace Camera_FOV.Services
             new DoriLevel(2, "Recognition", 125, "dori_125px"),
             new DoriLevel(3, "Identification", 250, "dori_250px")
         };
+
+        /// <summary>EVS-EN IEC 62676-4:2026, 3.1 and Table 3: low (LPDO) then high (HPDO) pixel density objects.</summary>
+        public static readonly IReadOnlyList<ObservationCategory> Categories = new List<ObservationCategory>
+        {
+            new ObservationCategory(0, "Overview", false, 20),
+            new ObservationCategory(1, "Outline", false, 40),
+            new ObservationCategory(2, "Discern", false, 80),
+            new ObservationCategory(3, "Perceive", true, 125),
+            new ObservationCategory(4, "Characterise", true, 250),
+            new ObservationCategory(5, "Validate", true, 500),
+            new ObservationCategory(6, "Scrutinise", true, 1500)
+        };
+
+        /// <summary>The highest observation category reached at this density, or null below Overview.</summary>
+        public static ObservationCategory CategoryFor(double pixelsPerMeter)
+        {
+            return Categories.LastOrDefault(c => pixelsPerMeter >= c.PixelsPerMeter);
+        }
 
         public static PixelDensityFormula CurrentFormula => SettingsManager.Settings.PixelDensityFormula;
 

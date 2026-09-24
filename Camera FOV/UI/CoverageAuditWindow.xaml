@@ -51,12 +51,13 @@
                 <!--  Level selector and options  -->
                 <StackPanel Margin="16,0,16,10" DockPanel.Dock="Top">
                     <Border Style="{StaticResource Segmented}">
-                        <UniformGrid x:Name="LevelSelector" Columns="5">
+                        <UniformGrid x:Name="LevelSelector" Columns="6">
                             <RadioButton Checked="Level_Checked" Content="Detection" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="0" />
                             <RadioButton Checked="Level_Checked" Content="Observation" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="1" />
                             <RadioButton Checked="Level_Checked" Content="Recognition" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="2" />
                             <RadioButton Checked="Level_Checked" Content="Identification" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="3" />
                             <RadioButton Checked="Level_Checked" Content="Best level" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-1" />
+                            <RadioButton Checked="Level_Checked" Content="IEC categories" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-2" ToolTip="Observation categories of IEC 62676-4:2026, worked out from the cameras and Boundary lines rather than from the drawn regions" />
                         </UniformGrid>
                     </Border>
                     <CheckBox
@@ -93,6 +94,7 @@
                             Text="Click the map to drop a pin and see which cameras cover that spot. Scroll to zoom, hold the wheel to pan, double-click it to zoom out."
                             TextWrapping="Wrap" />
                         <TextBlock
+                            x:Name="BasisText"
                             Margin="0,8,0,0"
                             Style="{StaticResource Type.Caption}"
                             Text="Based on the drawn coverage in plan: camera height, tilt and anything not drawn as a Boundary line are not modelled. Nothing in the model is changed."

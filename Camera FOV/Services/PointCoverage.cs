@@ -259,25 +259,35 @@ namespace Camera_FOV.Services
             return segments;
         }
 
-        private readonly struct Segment
+    }
+
+    /// <summary>A straight piece of a Boundary line in plan, in feet.</summary>
+    internal readonly struct Segment
+    {
+        private readonly double _x1, _y1, _x2, _y2;
+
+        public Segment(double x1, double y1, double x2, double y2)
         {
-            private readonly double _x1, _y1, _x2, _y2;
+            _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2;
+        }
 
-            public Segment(double x1, double y1, double x2, double y2)
-            {
-                _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2;
-            }
+        public double MinX => Math.Min(_x1, _x2);
+        public double MaxX => Math.Max(_x1, _x2);
+        public double MinY => Math.Min(_y1, _y2);
+        public double MaxY => Math.Max(_y1, _y2);
 
-            // Same test as DrawingTools.GetIntersectionDistance: parameters on both segments within [0, 1]
-            public bool Crosses(double x3, double y3, double x4, double y4)
-            {
-                double den = (_x1 - _x2) * (y3 - y4) - (_y1 - _y2) * (x3 - x4);
-                if (Math.Abs(den) < 1e-9) return false;
+        public bool Crosses(double x3, double y3, double x4, double y4) => Fraction(x3, y3, x4, y4) <= 1;
 
-                double t = ((_x1 - x3) * (y3 - y4) - (_y1 - y3) * (x3 - x4)) / den;
-                double u = -((_x1 - _x2) * (_y1 - y3) - (_y1 - _y2) * (_x1 - x3)) / den;
-                return t >= 0 && t <= 1 && u >= 0 && u <= 1;
-            }
+        // Same test as DrawingTools.GetIntersectionDistance: parameters on both segments within [0, 1].
+        // Returns how far along (x3,y3)→(x4,y4) this segment is hit, or double.MaxValue for no hit.
+        public double Fraction(double x3, double y3, double x4, double y4)
+        {
+            double den = (_x1 - _x2) * (y3 - y4) - (_y1 - _y2) * (x3 - x4);
+            if (Math.Abs(den) < 1e-9) return double.MaxValue;
+
+            double t = ((_x1 - x3) * (y3 - y4) - (_y1 - y3) * (x3 - x4)) / den;
+            double u = -((_x1 - _x2) * (_y1 - y3) - (_y1 - _y2) * (_x1 - x3)) / den;
+            return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? u : double.MaxValue;
         }
     }
 }
