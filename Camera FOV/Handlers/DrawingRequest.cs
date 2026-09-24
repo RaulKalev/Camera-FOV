@@ -27,6 +27,9 @@ namespace Camera_FOV.Handlers
         // The camera's state when it was selected in the window (see CoverageSource.MergeDrawnState).
         public string CameraStateAtSelection { get; }
 
+        // Rules to store in the project (SaveTracingRules only)
+        public Models.TracingRules TracingRules { get; }
+
         public DrawingRequest(
             DrawingEventHandler.DrawingAction action,
             DrawingTools drawingTools,
@@ -40,9 +43,11 @@ namespace Camera_FOV.Handlers
             double userRotation = 0,
             IEnumerable<DoriLayerConfig> doriLayers = null,
             bool drawAngularDimension = false,
-            string cameraStateAtSelection = null)
+            string cameraStateAtSelection = null,
+            Models.TracingRules tracingRules = null)
         {
             CameraStateAtSelection = cameraStateAtSelection;
+            TracingRules = tracingRules;
             Action = action;
             DrawingTools = drawingTools;
             Document = drawingTools.Document;
@@ -94,6 +99,7 @@ namespace Camera_FOV.Handlers
                     case DrawingEventHandler.DrawingAction.CreateFilledRegions: return "Creating the DORI filled region types";
                     case DrawingEventHandler.DrawingAction.TraceWallsAndDrawBoundary: return "Tracing the boundaries";
                     case DrawingEventHandler.DrawingAction.CheckViewCoverage: return "Checking the coverage";
+                    case DrawingEventHandler.DrawingAction.SaveTracingRules: return "Saving the tracing rules";
                     default: return $"The {Action} action";
                 }
             }

@@ -20,6 +20,9 @@ namespace Camera_FOV.Services
         private static readonly Guid CoverageSchemaGuid = new Guid("6C0E2F4B-9A51-4D6B-8E0B-3B1F6A2C7D41");
         private static readonly Guid TracedBoundarySchemaGuid = new Guid("B7D3A9E2-4F18-4C3A-9D6E-5A2E8C1F0B63");
         private static readonly Guid CoverageSourceSchemaGuid = new Guid("E4A1C7D9-2B6F-4F3E-8A15-9C0D7B3E6F28");
+        private static readonly Guid TracingRulesSchemaGuid = new Guid("5B9E3F14-7C2A-4D81-B6E0-2F8A4C9D1E57");
+
+        private const string FieldRules = "Rules";
 
         private const string FieldCameraState = "CameraState";
         private const string FieldBoundaryState = "BoundaryState";
@@ -214,6 +217,71 @@ namespace Camera_FOV.Services
             }
 
             return result;
+        }
+
+        #endregion
+
+        #region Tracing rules (per project)
+
+        /// <summary>
+        /// The project's tracing rules, or the defaults when none have been saved.
+        /// </summary>
+        public static Models.TracingRules LoadTracingRules(Document doc)
+        {
+            Entity entity = FindTracingRulesEntity(doc, out _);
+            return entity != null
+                ? Models.TracingRules.Parse(entity.Get<string>(FieldRules))
+                : Models.TracingRules.Default;
+        }
+
+        /// <summary>
+        /// Saves the tracing rules in the project, on one DataStorage element owned by the plugin.
+        /// Must be called inside an open transaction.
+        /// </summary>
+        public static void SaveTracingRules(Document doc, Models.TracingRules rules)
+        {
+            FindTracingRulesEntity(doc, out DataStorage storage);
+            if (storage == null)
+                storage = DataStorage.Create(doc);
+
+            Entity entity = new Entity(GetTracingRulesSchema());
+            entity.Set(FieldOwnerUniqueId, storage.UniqueId);
+            entity.Set(FieldRules, rules.Serialize());
+            storage.SetEntity(entity);
+        }
+
+        private static Entity FindTracingRulesEntity(Document doc, out DataStorage storage)
+        {
+            storage = null;
+            Schema schema = Schema.Lookup(TracingRulesSchemaGuid);
+            if (doc == null || schema == null) return null;
+
+            foreach (DataStorage candidate in new FilteredElementCollector(doc).OfClass(typeof(DataStorage)).Cast<DataStorage>())
+            {
+                Entity entity = candidate.GetEntity(schema);
+                if (IsOwnedBy(entity, candidate))
+                {
+                    storage = candidate;
+                    return entity;
+                }
+            }
+
+            return null;
+        }
+
+        private static Schema GetTracingRulesSchema()
+        {
+            Schema schema = Schema.Lookup(TracingRulesSchemaGuid);
+            if (schema != null) return schema;
+
+            SchemaBuilder builder = new SchemaBuilder(TracingRulesSchemaGuid);
+            builder.SetSchemaName("CameraFovTracingRules");
+            builder.SetDocumentation("Which obstacle categories Camera FOV traces into Boundary lines in this project.");
+            builder.SetReadAccessLevel(AccessLevel.Public);
+            builder.SetWriteAccessLevel(AccessLevel.Public);
+            builder.AddSimpleField(FieldOwnerUniqueId, typeof(string));
+            builder.AddSimpleField(FieldRules, typeof(string));
+            return builder.Finish();
         }
 
         #endregion

@@ -154,6 +154,17 @@
                         </StackPanel>
                     </Border>
 
+                    <!--  ============ Tracing rules (stored in the project) ============  -->
+                    <TextBlock Style="{StaticResource Type.Group}" Text="Tracing rules" />
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel x:Name="TracingRulesPanel" />
+                    </Border>
+                    <TextBlock
+                        Margin="12,6,12,0"
+                        Style="{StaticResource Type.Caption}"
+                        TextWrapping="Wrap"
+                        Text="Saved in this project and used by Trace walls. A floor plan can’t show what a camera really sees in 3D: open doors and see-through glass only mean no Boundary line is drawn there. Boundary lines you draw yourself are always kept." />
+
                     <!--  ============ Drawing ============  -->
                     <TextBlock Style="{StaticResource Type.Group}" Text="Drawing" />
                     <Border Padding="12,10,12,10" Style="{StaticResource Card}">

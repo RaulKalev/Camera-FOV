@@ -4,6 +4,7 @@ using Autodesk.Revit.UI;
 using Camera_FOV.Utils;
 using Camera_FOV;
 using Camera_FOV.Services;
+using Camera_FOV.Models;
 
 using System;
 using System.Collections.Generic;
@@ -38,7 +39,8 @@ namespace Camera_FOV.Handlers
         CreateFilledRegions,
         TraceWallsAndDrawBoundary,
         CheckCoverage,
-        CheckViewCoverage
+        CheckViewCoverage,
+        SaveTracingRules
     }
 
     // Requests wait here in the order the user made them until Revit runs the external event.
@@ -271,6 +273,15 @@ namespace Camera_FOV.Handlers
                     CheckViewCoverage();
                     break;
 
+                case DrawingAction.SaveTracingRules:
+                    using (Transaction transaction = new Transaction(_drawingTools.Document, "Camera FOV Tracing Rules"))
+                    {
+                        transaction.Start();
+                        ElementTagStorage.SaveTracingRules(_drawingTools.Document, request.TracingRules);
+                        transaction.Commit();
+                    }
+                    break;
+
                 default:
                     System.Diagnostics.Debug.WriteLine($"No handler for {_currentAction}");
                     break;
@@ -482,23 +493,8 @@ namespace Camera_FOV.Handlers
         }
     }
 
-    // Doors and windows whose opening crosses the cut plane get one line across the opening along
-    // the wall, instead of their detailed geometry, so the wall outline stays closed there.
-    private static readonly List<BuiltInCategory> OpeningCategories = new List<BuiltInCategory>
-    {
-        BuiltInCategory.OST_Doors,
-        BuiltInCategory.OST_Windows
-    };
-
-    // Categories whose solids are traced where they cross the cut plane.
-    private static readonly List<BuiltInCategory> TracedCategories = new List<BuiltInCategory>
-    {
-        BuiltInCategory.OST_Walls,
-        BuiltInCategory.OST_StructuralColumns,
-        BuiltInCategory.OST_Columns,
-        BuiltInCategory.OST_CurtainWallPanels,
-        BuiltInCategory.OST_CurtainWallMullions
-    };
+    // Which categories are traced, and whether door and window openings are closed with a line, come
+    // from the project's tracing rules (issue #8; see TracingRules).
 
     private const double GeometryTolerance = 1e-5; // feet
 
@@ -565,17 +561,29 @@ namespace Camera_FOV.Handlers
                 return;
             }
 
-            ElementMulticategoryFilter filter = new ElementMulticategoryFilter(TracedCategories);
+            TracingRules rules = ElementTagStorage.LoadTracingRules(doc);
+            if (rules.TracesNothing)
+            {
+                MessageDialog.ShowWarning(
+                    "Nothing is set to be traced",
+                    "The tracing rules for this project ignore every obstacle category. Open Settings and set at least one category to block the view, then trace again.");
+                return;
+            }
+
+            List<BuiltInCategory> tracedCategories = rules.TracedCategories();
+            ElementMulticategoryFilter filter = tracedCategories.Any() ? new ElementMulticategoryFilter(tracedCategories) : null;
 
             // Collect elements visible in the current view
-            var elements = new FilteredElementCollector(doc, view.Id)
-                .WherePasses(filter)
-                .WhereElementIsNotElementType()
-                .ToList();
+            List<Element> elements = filter == null
+                ? new List<Element>()
+                : new FilteredElementCollector(doc, view.Id)
+                    .WherePasses(filter)
+                    .WhereElementIsNotElementType()
+                    .ToList();
 
             var summary = new TraceSummary();
 
-            List<Element> openings = CollectOpenings(new FilteredElementCollector(doc, view.Id), summary);
+            List<Element> openings = CollectOpenings(new FilteredElementCollector(doc, view.Id), rules, summary);
 
             List<RevitLinkInstance> selectedLinks = SelectLinkedModels(doc, view);
 
@@ -605,13 +613,13 @@ namespace Camera_FOV.Handlers
 
                 foreach (var link in selectedLinks)
                 {
-                    TraceLinkedModel(link, filter, range, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
+                    TraceLinkedModel(link, filter, rules, range, view, boundaryLineStyle, doc, drawnCurveHashes, summary);
                 }
 
                 transaction.Commit();
             }
 
-            ShowTraceSummary(summary);
+            ShowTraceSummary(summary, rules, CountCamerasNeedingReview(doc, view));
         }
         catch (Exception ex)
         {
@@ -725,7 +733,8 @@ namespace Camera_FOV.Handlers
         return existingHashes;
     }
 
-    private void TraceLinkedModel(RevitLinkInstance link, ElementFilter filter, TraceRange range, View hostView, GraphicsStyle boundaryLineStyle, Document hostDoc, HashSet<string> drawnCurveHashes, TraceSummary summary)
+    // filter is null when the rules trace no solid categories (only door/window lines).
+    private void TraceLinkedModel(RevitLinkInstance link, ElementFilter filter, TracingRules rules, TraceRange range, View hostView, GraphicsStyle boundaryLineStyle, Document hostDoc, HashSet<string> drawnCurveHashes, TraceSummary summary)
     {
         Document linkedDoc = link.GetLinkDocument();
         if (linkedDoc == null)
@@ -739,27 +748,34 @@ namespace Camera_FOV.Handlers
         // Converts linked document coordinates to host coordinates (offset, rotation, elevation)
         Transform linkTransform = link.GetTotalTransform();
 
-        var linkedElements = new FilteredElementCollector(linkedDoc)
-            .WherePasses(filter)
-            .WhereElementIsNotElementType();
-
-        foreach (var element in linkedElements)
+        if (filter != null)
         {
-            TraceElement(element, linkTransform, range, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes, summary);
+            var linkedElements = new FilteredElementCollector(linkedDoc)
+                .WherePasses(filter)
+                .WhereElementIsNotElementType();
+
+            foreach (var element in linkedElements)
+            {
+                TraceElement(element, linkTransform, range, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes, summary);
+            }
         }
 
-        foreach (var opening in CollectOpenings(new FilteredElementCollector(linkedDoc), summary))
+        foreach (var opening in CollectOpenings(new FilteredElementCollector(linkedDoc), rules, summary))
         {
             CloseOpening(opening, linkTransform, range, hostView, boundaryLineStyle, hostDoc, drawnCurveHashes, summary);
         }
     }
 
-    // Any element in the door or window categories: loadable families as well as the DirectShapes
-    // that IFC links and imports produce.
-    private static List<Element> CollectOpenings(FilteredElementCollector collector, TraceSummary summary)
+    // Elements in the door and window categories whose openings the rules close: loadable families
+    // as well as the DirectShapes that IFC links and imports produce. Open categories stay untraced,
+    // so the gap in the wall is left open.
+    private static List<Element> CollectOpenings(FilteredElementCollector collector, TracingRules rules, TraceSummary summary)
     {
+        List<BuiltInCategory> categories = rules.ClosedOpeningCategories();
+        if (!categories.Any()) return new List<Element>();
+
         List<Element> openings = collector
-            .WherePasses(new ElementMulticategoryFilter(OpeningCategories))
+            .WherePasses(new ElementMulticategoryFilter(categories))
             .WhereElementIsNotElementType()
             .ToList();
 
@@ -1185,17 +1201,36 @@ namespace Camera_FOV.Handlers
         }
     }
 
-    private static void ShowTraceSummary(TraceSummary summary)
+    // Cameras in the view whose coverage no longer matches, typically because this trace changed
+    // the Boundary lines near them (see CoverageStatus). They are reported, never redrawn here.
+    private static int CountCamerasNeedingReview(Document doc, View view)
+    {
+        return ElementTagStorage.FindCoverageByCamera(doc, view)
+            .Select(group => CoverageStatus.Evaluate(doc, view, doc.GetElement(group.Key), group.Value))
+            .Count(s => s.State == CoverageState.NeedsReview || s.State == CoverageState.Stale);
+    }
+
+    private static void ShowTraceSummary(TraceSummary summary, TracingRules rules, int camerasNeedingReview)
     {
         var items = new List<MessageDialog.Item>();
+
+        items.Add(new MessageDialog.Item("Tracing rules", rules.Describe() + " Change them in Settings."));
+
+        if (camerasNeedingReview > 0)
+            items.Add(new MessageDialog.Item("Camera coverage",
+                $"{camerasNeedingReview} cameras in this view have coverage drawn against the old Boundary lines. Use the coverage check in the title bar to find them, then Update each one."));
 
         if (summary.LinesReplaced > 0)
             items.Add(new MessageDialog.Item("Previous trace replaced",
                 $"{summary.LinesReplaced} lines from the last trace were removed. Boundary lines you drew yourself were kept."));
 
-        if (summary.OpeningsCollected == 0)
+        if (!rules.ClosedOpeningCategories().Any())
         {
-            items.Add(new MessageDialog.Item("Doors and windows", "No elements in the Doors or Windows categories were found in this view or the chosen linked models."));
+            items.Add(new MessageDialog.Item("Doors and windows", "Both are set to open, so their openings were left open."));
+        }
+        else if (summary.OpeningsCollected == 0)
+        {
+            items.Add(new MessageDialog.Item("Doors and windows", "No closed door or window categories have elements in this view or the chosen linked models."));
         }
         else if (summary.OpeningsFound == 0)
         {

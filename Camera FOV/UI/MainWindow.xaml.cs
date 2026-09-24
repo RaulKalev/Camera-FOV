@@ -1024,6 +1024,17 @@ namespace Camera_FOV
             return _sliderResolution;
         }
 
+        public TracingRules GetTracingRules()
+        {
+            return ElementTagStorage.LoadTracingRules(_doc);
+        }
+
+        // Stored in the project, so it goes through Revit like any other change
+        public void SaveTracingRules(TracingRules rules)
+        {
+            SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.SaveTracingRules, _drawingTools, tracingRules: rules));
+        }
+
         public List<string> GetAngularDimensionTypeNames()
         {
             return new FilteredElementCollector(_doc)

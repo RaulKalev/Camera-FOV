@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using Camera_FOV.Models;
 using Camera_FOV.Services;
 using Camera_FOV.UI;
 
@@ -33,6 +34,68 @@ namespace Camera_FOV
             ParamResolution.Text = SettingsManager.Settings.ParameterName_Resolution;
 
             LoadDimensionSettings();
+            LoadTracingRules();
+        }
+
+        private TracingRules _initialTracingRules;
+        private readonly Dictionary<string, ComboBox> _ruleChoices = new Dictionary<string, ComboBox>();
+
+        // One row per obstacle category: its label and the two choices, the first meaning "traced".
+        private static readonly (string Key, string Label, string On, string Off)[] RuleRows =
+        {
+            ("walls", "Walls", "Blocks view", "Ignored"),
+            ("columns", "Columns", "Blocks view", "Ignored"),
+            ("panels", "Curtain panels (glazing)", "Blocks view", "See-through"),
+            ("mullions", "Curtain mullions", "Blocks view", "Ignored"),
+            ("doors", "Doors", "Closed", "Open"),
+            ("windows", "Windows", "Closed", "Open")
+        };
+
+        private void LoadTracingRules()
+        {
+            _initialTracingRules = _mainWindow.GetTracingRules();
+            var current = new Dictionary<string, bool>
+            {
+                { "walls", _initialTracingRules.Walls },
+                { "columns", _initialTracingRules.Columns },
+                { "panels", _initialTracingRules.CurtainPanels },
+                { "mullions", _initialTracingRules.Mullions },
+                { "doors", _initialTracingRules.CloseDoors },
+                { "windows", _initialTracingRules.CloseWindows }
+            };
+
+            for (int i = 0; i < RuleRows.Length; i++)
+            {
+                var row = RuleRows[i];
+                if (i > 0)
+                    TracingRulesPanel.Children.Add(new Border { Style = (Style)FindResource("RowSeparator") });
+
+                var grid = new Grid { Style = (Style)FindResource("CardRow") };
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                grid.Children.Add(new TextBlock { Text = row.Label, Style = (Style)FindResource("Type.Body") });
+
+                var choice = new ComboBox
+                {
+                    MinWidth = 120,
+                    Style = (Style)FindResource("Input.Combo"),
+                    ItemsSource = new[] { row.On, row.Off },
+                    SelectedIndex = current[row.Key] ? 0 : 1
+                };
+                System.Windows.Automation.AutomationProperties.SetName(choice, $"{row.Label} tracing rule");
+                Grid.SetColumn(choice, 1);
+                grid.Children.Add(choice);
+
+                TracingRulesPanel.Children.Add(grid);
+                _ruleChoices[row.Key] = choice;
+            }
+        }
+
+        private TracingRules ReadTracingRules()
+        {
+            bool On(string key) => _ruleChoices[key].SelectedIndex == 0;
+            return new TracingRules(On("walls"), On("columns"), On("panels"), On("mullions"), On("doors"), On("windows"));
         }
 
         private const string NoDimension = "No dimension";
@@ -101,6 +164,11 @@ namespace Camera_FOV
             SettingsManager.Settings.FovDimensionTypeName = dimensionType == null || dimensionType == NoDimension ? string.Empty : dimensionType;
             SettingsManager.Settings.FovDimensionDistanceMeters = dimensionDistance;
             SettingsManager.Settings.AutoFlipCameraSymbol = AutoFlipCheckBox.IsChecked == true;
+
+            // Only written to the project when changed, so saving settings doesn't add an undo step
+            TracingRules rules = ReadTracingRules();
+            if (!rules.Equals(_initialTracingRules))
+                _mainWindow.SaveTracingRules(rules);
 
             SettingsManager.Settings.ParameterName_UserRotation = ParamRotation.Text;
             SettingsManager.Settings.ParameterName_FOVOverride = ParamFOVOverride.Text;
