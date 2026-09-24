@@ -54,6 +54,18 @@
                                 Kind="Crosshairs" />
                         </Button>
                         <Button
+                            x:Name="CameraTypesButton"
+                            Margin="0,0,2,0"
+                            AutomationProperties.Name="Camera types"
+                            Click="CameraTypesButton_Click"
+                            Style="{StaticResource Button.Icon}"
+                            ToolTip="Camera types: the shared library of camera models, their lenses and field of view ranges, and the Revit types made from them">
+                            <materialDesign:PackIcon
+                                Width="16"
+                                Height="16"
+                                Kind="CameraOutline" />
+                        </Button>
+                        <Button
                             x:Name="CoverageAuditButton"
                             Margin="0,0,2,0"
                             AutomationProperties.Name="Coverage audit"
@@ -210,6 +222,7 @@
                                     Grid.Column="1"
                                     MinWidth="88"
                                     AutomationProperties.Name="Field of view in degrees"
+                                    LostFocus="FOVAngleTextBox_LostFocus"
                                     Style="{StaticResource Input.Value}"
                                     Text="93" />
                                 <TextBlock
@@ -217,6 +230,13 @@
                                     Style="{StaticResource Type.Unit}"
                                     Text="°" />
                             </Grid>
+                            <!--  The range allowed by the camera type the selected camera was made from  -->
+                            <TextBlock
+                                x:Name="FovLimitText"
+                                Margin="12,-4,12,8"
+                                Style="{StaticResource Type.Caption}"
+                                TextWrapping="Wrap"
+                                Visibility="Collapsed" />
                             <Border Style="{StaticResource RowSeparator}" />
                             <Grid Style="{StaticResource CardRow}">
                                 <Grid.ColumnDefinitions>

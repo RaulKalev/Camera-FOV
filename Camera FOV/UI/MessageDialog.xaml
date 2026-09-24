@@ -126,7 +126,12 @@
                         Content="Show details"
                         Style="{StaticResource Button.Secondary}"
                         Visibility="Collapsed" />
+                    <StackPanel
+                        x:Name="ChoicesPanel"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal" />
                     <Button
+                        x:Name="OkButton"
                         MinWidth="72"
                         HorizontalAlignment="Right"
                         Click="OkButton_Click"

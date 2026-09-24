@@ -105,6 +105,42 @@ namespace Camera_FOV.UI
         public static void ShowWarning(string heading, string message = null, IList<Item> items = null, Window owner = null)
             => Show(Kind.Warning, heading, message, items, null, owner);
 
+        /// <summary>
+        /// Asks a question with a button per choice: the first is the primary one, the last also closes
+        /// the dialog on Esc. Returns the index of the choice, or the last one when the dialog is closed.
+        /// </summary>
+        public static int Ask(Kind kind, string heading, string message, string[] choices, Window owner = null)
+        {
+            var dialog = new MessageDialog(kind, heading, message, null, null);
+            dialog.OkButton.Visibility = Visibility.Collapsed;
+
+            int answer = choices.Length - 1;
+            for (int i = 0; i < choices.Length; i++) // Primary ends up on the right, like the other footers
+            {
+                int index = i;
+                var button = new System.Windows.Controls.Button
+                {
+                    Content = choices[i],
+                    MinWidth = 72,
+                    Margin = new Thickness(8, 0, 0, 0),
+                    IsDefault = i == 0,
+                    IsCancel = i == choices.Length - 1,
+                    Style = (Style)dialog.FindResource(i == 0 ? "Button.Primary" : "Button.Secondary")
+                };
+                button.Click += (s, e) => { answer = index; dialog.Close(); };
+                dialog.ChoicesPanel.Children.Insert(0, button);
+            }
+
+            owner = owner ?? DefaultOwner;
+            if (owner != null && owner.IsVisible)
+                dialog.Owner = owner;
+            else
+                dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
+            dialog.ShowDialog();
+            return answer;
+        }
+
         // For unexpected failures: a plain explanation up front, the exception behind "Show details".
         public static void ShowError(string heading, string message, Exception ex = null, Window owner = null)
             => Show(Kind.Error, heading, message, null, ex?.ToString(), owner);

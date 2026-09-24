@@ -39,6 +39,10 @@ namespace Camera_FOV.Models
         [JsonConverter(typeof(StringEnumConverter))]
         public PixelDensityFormula PixelDensityFormula { get; set; } = PixelDensityFormula.Standard;
 
+        // Folder of the shared camera type library (a network drive or synced folder). Empty keeps the
+        // library on this PC only.
+        public string CameraTypesFolder { get; set; } = string.Empty;
+
         // Flip the camera family when drawing if its 2D symbol ends up pointing away from the coverage
         public bool AutoFlipCameraSymbol { get; set; } = true;
     }

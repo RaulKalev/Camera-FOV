@@ -49,6 +49,14 @@ The plugin works with families in the **Security Devices** category. It reads th
 
 If a family has none of these, type the field of view and pick the resolution in the window instead.
 
+## Camera types
+
+The camera icon in the main window opens **Camera types**, a library of the camera models you use: resolution, sensor size, focal length, the horizontal and vertical field of view ranges, and any custom parameters you add. **Work out field of view** fills the ranges from the sensor and focal length.
+
+- **Share it.** Choose a shared folder (a network drive or a synced OneDrive/SharePoint folder) with **Change** at the bottom of the window, and everyone uses the same library. Each camera type is its own file. If someone else saved a camera type after you opened it, you're asked whether to keep yours or load theirs. Deleted types are moved to a `deleted` folder, so they can be restored.
+- **Make Revit types from it.** Pick a camera family and press **Create Revit type**. The plugin duplicates a type of that family under the camera type's name and writes the resolution, the widest field of view and your custom parameters to the type parameters with the same names. If one of these parameters is missing from the family, you're told which.
+- **Stay within the lens.** A camera of such a type can only be set within its horizontal range in the main window. A fixed lens can't be changed at all.
+
 ## More screenshots
 
 <p align="center">

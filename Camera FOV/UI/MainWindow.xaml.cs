@@ -73,7 +73,86 @@ namespace Camera_FOV
                 _drawingEventHandler = new DrawingEventHandler();
                 _drawingEventHandler.SetMainWindow(this);
             }
+
+            // Created here, while the command runs: an external event can only be made in a Revit API context
+            if (_revitActions == null)
+                _revitActions = new RevitActionHandler();
         }
+
+        // ------------------------------
+        // CAMERA TYPES
+        // ------------------------------
+        private RevitActionHandler _revitActions;
+        private CameraTypesWindow _cameraTypesWindow;
+        private CameraType _cameraType; // The library camera type the selected camera's family type was made from
+
+        private void CameraTypesButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_cameraTypesWindow != null && _cameraTypesWindow.IsLoaded)
+            {
+                _cameraTypesWindow.Activate();
+                return;
+            }
+
+            ElementId family = (_selectedCameraElement as FamilyInstance)?.Symbol?.Family?.Id;
+            _cameraTypesWindow = new CameraTypesWindow(_doc, _revitActions, family, RefreshCameraTypeLimits) { Owner = this };
+            _cameraTypesWindow.Show();
+        }
+
+        // The selected camera's type may have been created or updated from the library
+        private void RefreshCameraTypeLimits()
+        {
+            if (_selectedCameraElement != null && _selectedCameraElement.IsValidObject)
+                ApplyCameraTypeLimits(_selectedCameraElement);
+        }
+
+        // A camera whose family type comes from the library can only be set within that camera type's
+        // horizontal field of view; a fixed lens can't be changed at all.
+        private void ApplyCameraTypeLimits(Element camera)
+        {
+            try { _cameraType = CameraTypeLink.GetLinked(camera); }
+            catch (Exception) { _cameraType = null; }
+
+            if (_cameraType == null)
+            {
+                FovLimitText.Visibility = System.Windows.Visibility.Collapsed;
+                FOVAngleTextBox.IsReadOnly = false;
+                FOVAngleTextBox.ToolTip = null;
+                return;
+            }
+
+            string range = CameraType.FormatRange(_cameraType.HorizontalFovMin, _cameraType.HorizontalFovMax, "°");
+            FOVAngleTextBox.IsReadOnly = !_cameraType.IsVarifocal;
+            FOVAngleTextBox.ToolTip = _cameraType.IsVarifocal
+                ? $"{_cameraType.Name} can be set from {range}"
+                : $"{_cameraType.Name} has a fixed {range} lens";
+            FovLimitText.Text = _cameraType.IsVarifocal
+                ? $"{_cameraType.Name}: {range}"
+                : $"{_cameraType.Name}: fixed lens, {range}";
+            FovLimitText.SetResourceReference(ForegroundProperty, "Text.Tertiary");
+            FovLimitText.Visibility = System.Windows.Visibility.Visible;
+
+            if (!_cameraType.IsVarifocal)
+                FOVAngleTextBox.Text = _cameraType.HorizontalFovMax.ToString("0.#", CultureInfo.InvariantCulture);
+            else
+                ClampFovToCameraType();
+
+            if (_cameraType.HorizontalResolution > 0)
+                SelectResolutionInComboOrFallback(_cameraType.HorizontalResolution);
+        }
+
+        // Pulls a field of view outside the camera type's range back to its nearest end
+        private void ClampFovToCameraType()
+        {
+            if (_cameraType == null || !TryParseFov(FOVAngleTextBox.Text, out double fov) || _cameraType.AllowsHorizontalFov(fov)) return;
+
+            double limited = _cameraType.ClampHorizontalFov(fov);
+            FOVAngleTextBox.Text = limited.ToString("0.#", CultureInfo.InvariantCulture);
+            FovLimitText.Text = $"{_cameraType.Name}: limited to {limited:0.#}°, its range is {CameraType.FormatRange(_cameraType.HorizontalFovMin, _cameraType.HorizontalFovMax, "°")}";
+            FovLimitText.SetResourceReference(ForegroundProperty, "Status.Warning");
+        }
+
+        private void FOVAngleTextBox_LostFocus(object sender, RoutedEventArgs e) => ClampFovToCameraType();
 
         // Hands the request to Revit. Failures of explicit actions are reported; a preview that
         // could not be sent is simply superseded by the next one.
@@ -704,6 +783,9 @@ namespace Camera_FOV
                 SelectResolutionInComboOrFallback();
             }
 
+            // A camera type from the library limits the field of view (and sets the resolution)
+            ApplyCameraTypeLimits(element);
+
             // Show the direction line for the loaded camera straight away
             SendPreviewUpdate();
 
@@ -870,6 +952,11 @@ namespace Camera_FOV
                 {
                     problems.Add(new MessageDialog.Item("Field of view",
                         $"“{FOVAngleTextBox.Text}” is not a valid angle. Enter the horizontal field of view in degrees, above 0 and up to 360 (for example 93)."));
+                }
+                else if (_cameraType != null && !_cameraType.AllowsHorizontalFov(fovAngle))
+                {
+                    problems.Add(new MessageDialog.Item("Field of view",
+                        $"{fovAngle:0.#}° is outside what {_cameraType.Name} can do ({CameraType.FormatRange(_cameraType.HorizontalFovMin, _cameraType.HorizontalFovMax, "°")})."));
                 }
 
                 if (!double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double userRotation))
