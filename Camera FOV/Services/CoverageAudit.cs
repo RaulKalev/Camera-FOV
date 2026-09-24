@@ -27,6 +27,8 @@ namespace Camera_FOV.Services
         public double? FovDegrees;
         public double? AimDegrees; // Plan direction the camera faces, in degrees
         public CameraMount Mount;  // Height and tilt (issue #16)
+        public ObservationCategory IntendedCategory; // What it is for (issue #14)
+        public string RiskGrade;
         public CoverageState State;
     }
 
@@ -171,6 +173,9 @@ namespace Camera_FOV.Services
             auditCamera.Resolution = values.Resolution;
             auditCamera.AimDegrees = values.AimDegrees;
             auditCamera.Mount = values.Mount;
+            var (category, grade) = CameraPurpose.Read(camera);
+            auditCamera.IntendedCategory = category;
+            auditCamera.RiskGrade = grade;
         }
 
         // Rooms and MEP spaces whose height range contains the plan's cut plane, with their boundaries

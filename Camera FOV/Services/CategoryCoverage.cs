@@ -120,6 +120,13 @@ namespace Camera_FOV.Services
             return loops;
         }
 
+        /// <summary>Whether the category is reached anywhere outside the dead zone, ignoring Boundary lines.</summary>
+        public bool Reaches(ObservationCategory category)
+        {
+            double limit = Math.Min(Math.Min(OverviewFeet, FarFeet), DistanceFeet(category.PixelsPerMeter));
+            return limit > 0 && limit > NearFeet;
+        }
+
         /// <summary>The dead zone below the camera (issue #16), as loops; empty when it has none or it isn't known.</summary>
         public List<List<PlanPoint>> DeadZone()
         {

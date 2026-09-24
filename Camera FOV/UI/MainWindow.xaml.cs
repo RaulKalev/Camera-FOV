@@ -154,6 +154,110 @@ namespace Camera_FOV
 
         private void FOVAngleTextBox_LostFocus(object sender, RoutedEventArgs e) => ClampFovToCameraType();
 
+        // ------------------------------
+        // PURPOSE (issue #14)
+        // ------------------------------
+        private const string NotSet = "Not set";
+        private bool _loadingPurpose;
+
+        private void InitializePurpose()
+        {
+            PurposeCategoryCombo.ItemsSource = new[] { NotSet }.Concat(CameraData.Categories.Select(c => $"{c.Name} ({c.PixelsPerMeter:0} px/m)")).ToList();
+            RiskGradeCombo.ItemsSource = new[] { NotSet }.Concat(CameraPurpose.RiskGrades).ToList();
+            FOVAngleTextBox.TextChanged += (s, e) => UpdatePurposeReach();
+            ResolutionComboBox.SelectionChanged += (s, e) => UpdatePurposeReach();
+            LoadPurpose(null);
+        }
+
+        private void LoadPurpose(Element camera)
+        {
+            _loadingPurpose = true;
+            try
+            {
+                var (category, grade) = camera != null ? CameraPurpose.Read(camera) : (null, null);
+                PurposeCategoryCombo.SelectedIndex = category != null ? category.Index + 1 : 0;
+                RiskGradeCombo.SelectedIndex = grade != null ? CameraPurpose.RiskGrades.ToList().IndexOf(grade) + 1 : 0;
+            }
+            catch (Exception)
+            {
+                PurposeCategoryCombo.SelectedIndex = RiskGradeCombo.SelectedIndex = 0;
+            }
+            finally
+            {
+                _loadingPurpose = false;
+            }
+
+            PurposeCategoryCombo.IsEnabled = RiskGradeCombo.IsEnabled = camera != null;
+            UpdatePurposeReach();
+        }
+
+        private ObservationCategory SelectedPurposeCategory =>
+            PurposeCategoryCombo.SelectedIndex > 0 ? CameraData.Categories[PurposeCategoryCombo.SelectedIndex - 1] : null;
+
+        private string SelectedRiskGrade =>
+            RiskGradeCombo.SelectedIndex > 0 ? CameraPurpose.RiskGrades[RiskGradeCombo.SelectedIndex - 1] : null;
+
+        // Stores the choice on the camera straight away, like the rotation
+        private void Purpose_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_loadingPurpose || _selectedCameraElement == null || _revitActions == null) return;
+            UpdatePurposeReach();
+
+            Element camera = _selectedCameraElement;
+            ObservationCategory category = SelectedPurposeCategory;
+            string grade = SelectedRiskGrade;
+
+            bool queued = _revitActions.Enqueue("save the camera’s purpose", app =>
+            {
+                if (!camera.IsValidObject) return;
+                using (var transaction = new Transaction(camera.Document, "Camera purpose"))
+                {
+                    transaction.Start();
+                    CameraPurpose.Write(camera, category, grade);
+                    transaction.Commit();
+                }
+                UpdatePurposeReach();
+            }, out string error);
+
+            if (!queued)
+                MessageDialog.ShowWarning("Revit didn’t accept the request", error, owner: this);
+        }
+
+        // Whether the camera, as set in the window, reaches its intended category
+        private void UpdatePurposeReach()
+        {
+            if (PurposeReachText == null) return;
+            PurposeReachText.SetResourceReference(ForegroundProperty, "Text.Tertiary");
+
+            if (_selectedCameraElement == null || !_selectedCameraElement.IsValidObject)
+            {
+                PurposeReachText.Text = "Select a camera to set what it is for.";
+                return;
+            }
+
+            string storage = CameraPurpose.HasParameters(_selectedCameraElement)
+                ? string.Empty
+                : $" Kept by the plugin; add text parameters “{SettingsManager.Settings.ParameterName_IntendedCategory}” and “{SettingsManager.Settings.ParameterName_RiskGrade}” to the family to show them in schedules.";
+
+            ObservationCategory category = SelectedPurposeCategory;
+            if (category == null)
+            {
+                PurposeReachText.Text = "Set the category this camera must reach to check it." + storage;
+                return;
+            }
+
+            if (!TryGetSelectedResolution(out int resolution) || !TryParseFov(FOVAngleTextBox.Text, out double fov))
+            {
+                PurposeReachText.Text = "Enter the field of view and resolution to check the category.";
+                return;
+            }
+
+            CameraMount mount = CameraMount.Read(_selectedCameraElement, fov);
+            var reach = CameraPurpose.Reach(resolution, fov, mount, category);
+            PurposeReachText.Text = reach.Text + PointCoverage.MountNote(mount, reach.ToMeters, category.Index >= 5) + storage;
+            if (!reach.Met) PurposeReachText.SetResourceReference(ForegroundProperty, "Status.Warning");
+        }
+
         // Hands the request to Revit. Failures of explicit actions are reported; a preview that
         // could not be sent is simply superseded by the next one.
         private void SendRequest(DrawingRequest request)
@@ -276,6 +380,7 @@ namespace Camera_FOV
             CheckboxIdentification.Unchecked += (s, e) => UpdateMaxDistance();
 
             InitializeDoriRegionMapping();
+            InitializePurpose();
 
             LoadSettings();
 
@@ -785,6 +890,7 @@ namespace Camera_FOV
 
             // A camera type from the library limits the field of view (and sets the resolution)
             ApplyCameraTypeLimits(element);
+            LoadPurpose(element);
 
             // Show the direction line for the loaded camera straight away
             SendPreviewUpdate();

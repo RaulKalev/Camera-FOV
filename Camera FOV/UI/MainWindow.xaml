@@ -291,6 +291,49 @@
                         </StackPanel>
                     </Border>
 
+                    <!--  ============ What the camera is for (issue #14) ============  -->
+                    <TextBlock Style="{StaticResource Type.Group}" Text="Purpose" />
+                    <Border x:Name="PurposeCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Intended category" />
+                                <ComboBox
+                                    x:Name="PurposeCategoryCombo"
+                                    Grid.Column="1"
+                                    MinWidth="150"
+                                    AutomationProperties.Name="Intended observation category"
+                                    SelectionChanged="Purpose_SelectionChanged"
+                                    Style="{StaticResource Input.Combo}"
+                                    ToolTip="The observation category (IEC 62676-4:2026) this camera must reach" />
+                            </Grid>
+                            <Border Style="{StaticResource RowSeparator}" />
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Risk grade" />
+                                <ComboBox
+                                    x:Name="RiskGradeCombo"
+                                    Grid.Column="1"
+                                    MinWidth="150"
+                                    AutomationProperties.Name="Risk grade"
+                                    SelectionChanged="Purpose_SelectionChanged"
+                                    Style="{StaticResource Input.Combo}"
+                                    ToolTip="Risk grade of the camera's function: BR, or security grade SG1 to SG4 (IEC 62676-4:2026, 4.2.3)" />
+                            </Grid>
+                            <TextBlock
+                                x:Name="PurposeReachText"
+                                Margin="12,0,12,10"
+                                Style="{StaticResource Type.Caption}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
                     <!--  ============ Rotation ============  -->
                     <TextBlock Style="{StaticResource Type.Group}" Text="Rotation" />
                     <Border Style="{StaticResource Card}">

@@ -735,7 +735,10 @@ namespace Camera_FOV.UI
             {
                 ObservationCategory category = CameraData.CategoryFor(s.Density);
                 return $"{s.Sight.Camera.Label}: {category?.Name ?? "below Overview"}, {s.Density:0} px/m at {s.Sight.SlantMeters(s.Meters):0.0} m"
-                    + PointCoverage.MountNote(s.Sight.Camera.Mount, s.Meters, category != null && category.Index >= 5);
+                    + PointCoverage.MountNote(s.Sight.Camera.Mount, s.Meters, category != null && category.Index >= 5)
+                    + (s.Sight.Camera.IntendedCategory is ObservationCategory intended
+                        ? (s.Density >= intended.PixelsPerMeter ? $" Meets its intended {intended.Name} here." : $" Below its intended {intended.Name} here.")
+                        : string.Empty);
             });
 
             string heading = sees.Count == 1 ? "1 camera sees this spot" : $"{sees.Count} cameras see this spot";
@@ -812,6 +815,13 @@ namespace Camera_FOV.UI
                           "not from the drawn DORI regions, so cameras count whether or not their coverage is drawn or up to date.";
             if (_skipped.Any())
                 text += $" Left out, with no field of view, resolution or direction: {string.Join(", ", _skipped.Select(c => c.Label))}.";
+            // Cameras whose intended category (issue #14) can't be reached anywhere outside their dead zone
+            List<string> unmet = _sights
+                .Where(s => s.Camera.IntendedCategory != null && !s.Reaches(s.Camera.IntendedCategory))
+                .Select(s => $"{s.Camera.Label} ({s.Camera.IntendedCategory.Name})")
+                .ToList();
+            if (unmet.Any())
+                text += $" Can’t reach their intended category: {string.Join(", ", unmet)}.";
             if (_data.LinkedRoomSources > 0)
                 text += $" Rooms include {_data.LinkedRoomSources} linked models.";
 
