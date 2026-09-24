@@ -39,6 +39,13 @@ namespace Camera_FOV.Handlers
         TraceWallsAndDrawBoundary
     }
 
+    // Requests wait here in the order the user made them until Revit runs the external event.
+    private readonly object _queueLock = new object();
+    private readonly List<DrawingRequest> _pending = new List<DrawingRequest>();
+    private readonly ExternalEvent _externalEvent;
+    private bool _closed;
+
+    // Context of the request being executed, loaded from that request on the Revit thread.
     private DrawingAction _currentAction = DrawingAction.None;
     private DrawingTools _drawingTools;
     private XYZ _position;
@@ -47,74 +54,154 @@ namespace Camera_FOV.Handlers
     private double _fovAngle;
     private ElementId _filledRegionTypeId;
     private double _sliderResolution;
-    private UIDocument _uiDoc; // Add a field for the UIDocument
+    private UIDocument _uiDoc;
     private MainWindow _mainWindow;
-    private string _newLineStyleName; // Add this to store the new line style name
     private Element _cameraElement; // For parameter updates
     private double _parameterValue; // For parameter updates
     private List<ElementId> _lastBatchCreatedIds = new List<ElementId>(); // Undo batch tracker
-    public bool DrawAngularDimension { get; set; } = false;
-    private List<DoriLayerConfig> _doriLayers;
+    private bool _drawAngularDimension;
+    private IReadOnlyList<DoriLayerConfig> _doriLayers;
+
+    // Must be constructed in a Revit API context (e.g. while an external command runs).
+    public DrawingEventHandler()
+    {
+        _externalEvent = ExternalEvent.Create(this);
+    }
 
     public void SetMainWindow(MainWindow mainWindow)
     {
         _mainWindow = mainWindow;
     }
-    public void SetupBoundaryLineCreation(UIDocument uiDoc)
+
+    // Queues the request and asks Revit to run it. A preview replaces a preview still waiting at
+    // the end of the queue; every other action is kept and runs exactly once, in order.
+    public bool Enqueue(DrawingRequest request, out string error)
     {
-        _uiDoc = uiDoc;
-        _currentAction = DrawingAction.CreateBoundaryLine;
-    }
-    public void SetupCreateFilledRegions(UIDocument uiDoc)
-    {
-        _uiDoc = uiDoc;
-        _currentAction = DrawingAction.CreateFilledRegions;
-    }
-    public void SetupTraceWallsAndDrawBoundary(UIDocument uiDoc)
-    {
-        _uiDoc = uiDoc;
-        _currentAction = DrawingAction.TraceWallsAndDrawBoundary;
-    }
-    public void SetupChangeBoundaryLineType(UIDocument uiDoc, string newLineStyleName)
-    {
-        _uiDoc = uiDoc;
-        _newLineStyleName = newLineStyleName; // Store the new line style name
-    }
-    public void Setup(
-        DrawingTools drawingTools,
-        DrawingAction action,
-        XYZ position = null,
-        double maxDistance = 0,
-        double rotationAngle = 0,
-        double fovAngle = 90,
-        ElementId filledRegionTypeId = null,
-        double sliderResolution = 1.0,
-        Element cameraElement = null,
-        double userRotationForParameter = 0,
-        List<DoriLayerConfig> doriLayers = null)
-    {
-        _drawingTools = drawingTools;
-        _currentAction = action;
-        _position = position;
-        _maxDistance = maxDistance;
-        _rotationAngle = rotationAngle;
-        _fovAngle = fovAngle;
-        _filledRegionTypeId = filledRegionTypeId;
-        _sliderResolution = sliderResolution;
-        _cameraElement = cameraElement;
-        _parameterValue = userRotationForParameter;
-        _doriLayers = doriLayers;
+        error = null;
+        lock (_queueLock)
+        {
+            if (_closed)
+            {
+                error = "The Camera FOV window has been closed.";
+                return false;
+            }
+
+            if (request.IsPreview && _pending.Count > 0 && _pending[_pending.Count - 1].IsPreview)
+                _pending[_pending.Count - 1] = request;
+            else
+                _pending.Add(request);
+        }
+
+        return RaiseEvent(out error);
     }
 
-    public void SetupCameraParameterUpdate(Element cameraElement, double rotationValue)
+    // Called when the window closes: waiting previews are dropped, actions the user already asked
+    // for still run, then the cleanup request, and nothing is accepted afterwards.
+    public void Close(DrawingRequest cleanup)
     {
-        _cameraElement = cameraElement;
-        _parameterValue = rotationValue;
-        _currentAction = DrawingAction.UpdateCameraParameter;
+        lock (_queueLock)
+        {
+            if (_closed) return;
+            _pending.RemoveAll(r => r.IsPreview);
+            _pending.Add(cleanup);
+            _closed = true;
+        }
+
+        RaiseEvent(out _);
+    }
+
+    private bool RaiseEvent(out string error)
+    {
+        error = null;
+        ExternalEventRequest result = _externalEvent.Raise();
+
+        // Pending means an earlier raise has not run yet; that run drains the whole queue.
+        if (result == ExternalEventRequest.Accepted || result == ExternalEventRequest.Pending)
+            return true;
+
+        // Revit refused the event, so nothing queued would ever run. Drop it rather than let it
+        // replay later against a model that may have changed.
+        lock (_queueLock)
+        {
+            _pending.Clear();
+        }
+
+        error = $"Revit did not accept the request ({result}). Nothing was changed in the model; please try again.";
+        return false;
     }
 
     public void Execute(UIApplication app)
     {
+        while (true)
+        {
+            DrawingRequest request;
+            lock (_queueLock)
+            {
+                if (_pending.Count == 0) return;
+                request = _pending[0];
+                _pending.RemoveAt(0);
+            }
+
+            Run(app, request);
+        }
+    }
+
+    // Returns why the request can no longer run safely, or null when it can.
+    private static string Validate(DrawingRequest request, UIApplication app)
+    {
+        Document doc = request.Document;
+        if (doc == null || !doc.IsValidObject)
+            return "the project it was made in has been closed";
+
+        UIDocument activeUiDoc = app.ActiveUIDocument;
+        if (request.RequiresActiveDocument && (activeUiDoc == null || !activeUiDoc.Document.Equals(doc)))
+            return $"'{doc.Title}' is no longer the active project";
+
+        if (!(doc.GetElement(request.ViewId) is View view))
+            return "the view it was made in no longer exists";
+
+        if (request.RequiresActiveView && activeUiDoc.ActiveView?.Id != request.ViewId)
+            return $"'{view.Name}' is no longer the active view";
+
+        if (request.CameraId != null && doc.GetElement(request.CameraId) == null)
+            return "the selected camera no longer exists";
+
+        return null;
+    }
+
+    private void Load(DrawingRequest request, UIApplication app)
+    {
+        _currentAction = request.Action;
+        _drawingTools = request.DrawingTools;
+        _uiDoc = app.ActiveUIDocument;
+        _position = request.Position;
+        _maxDistance = request.MaxDistance;
+        _rotationAngle = request.RotationAngle;
+        _fovAngle = request.FovAngle;
+        _filledRegionTypeId = request.FilledRegionTypeId;
+        _sliderResolution = request.SliderResolution;
+        _cameraElement = request.CameraId != null ? request.Document.GetElement(request.CameraId) : null;
+        _parameterValue = request.UserRotation;
+        _doriLayers = request.DoriLayers;
+        _drawAngularDimension = request.DrawAngularDimension;
+    }
+
+    private void Run(UIApplication app, DrawingRequest request)
+    {
+        string rejection = Validate(request, app);
+        if (rejection != null)
+        {
+            if (request.IsPreview || request.Action == DrawingAction.Delete)
+                System.Diagnostics.Debug.WriteLine($"Skipped {request.Action}: {rejection}");
+            else
+                MessageDialog.ShowWarning(
+                    $"{request.Description} didn’t run",
+                    $"It was skipped because {rejection}, so nothing was changed. Go back to the view the Camera FOV window was opened in and try again.");
+            return;
+        }
+
+        Load(request, app);
+
         try
         {
             switch (_currentAction)
@@ -156,7 +243,7 @@ namespace Camera_FOV.Handlers
                     else
                     {
                         // Fallback single mode
-                        ElementId id = DrawLayer(_maxDistance, _filledRegionTypeId, DrawAngularDimension);
+                        ElementId id = DrawLayer(_maxDistance, _filledRegionTypeId, _drawAngularDimension);
                         _lastBatchCreatedIds.Clear();
                         if (id != ElementId.InvalidElementId) _lastBatchCreatedIds.Add(id);
                     }
@@ -197,27 +284,27 @@ namespace Camera_FOV.Handlers
                     break;
 
                 default:
-                    TaskDialog.Show("Info", "No valid action was set up.");
+                    System.Diagnostics.Debug.WriteLine($"No handler for {_currentAction}");
                     break;
             }
         }
         catch (Exception ex)
         {
-            TaskDialog.Show("Error", $"An error occurred during {_currentAction}: {ex.Message}");
+            MessageDialog.ShowError(
+                $"{request.Description} failed",
+                "Revit reported an error and the change was not completed. If it keeps happening, show the details and send them with a description of what you were doing.",
+                ex);
         }
         finally
         {
-            _currentAction = DrawingAction.None; // Reset action
+            // Don't hold on to elements or documents between requests
+            _currentAction = DrawingAction.None;
+            _cameraElement = null;
+            _uiDoc = null;
         }
     }
     private void CreateBoundaryLine()
     {
-        if (_uiDoc == null)
-        {
-            TaskDialog.Show("Error", "UIDocument is not initialized.");
-            return;
-        }
-
         Document doc = _uiDoc.Document;
 
         try
@@ -243,58 +330,60 @@ namespace Camera_FOV.Handlers
 
                 if (boundaryCategory != null)
                 {
-                    MessageBox.Show("Boundary line style already exists.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
                     transaction.RollBack(); // Rollback since nothing is being changed
+                    MessageDialog.ShowInfo(
+                        "Boundary line style already exists",
+                        "This project already has a “Boundary” line style, so nothing was changed. Draw detail lines with it wherever something should block a camera’s view.");
                     return;
                 }
 
                 // Create a new subcategory for "Boundary"
                 boundaryCategory = categories.NewSubcategory(linesCategory, "Boundary");
 
-                if (boundaryCategory != null)
+                if (boundaryCategory == null)
                 {
-                    // Set the properties for the Boundary line style
-                    boundaryCategory.LineColor = new Color(0, 255, 0); // Green color
-                    boundaryCategory.SetLineWeight(1, GraphicsStyleType.Projection); // Line weight 1
-
-                    // Assign the "Solid" line pattern
-                    LinePatternElement solidPattern = new FilteredElementCollector(doc)
-                        .OfClass(typeof(LinePatternElement))
-                        .Cast<LinePatternElement>()
-                        .FirstOrDefault(lp => lp.Name.Equals("Solid"));
-
-                    if (solidPattern != null)
-                    {
-                        boundaryCategory.SetLinePatternId(solidPattern.Id, GraphicsStyleType.Projection);
-                    }
-                    else
-                    {
-                        TaskDialog.Show("Warning", "Solid line pattern not found.");
-                    }
-
-                    MessageBox.Show("Boundary line style created successfully.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                    transaction.RollBack();
+                    MessageDialog.ShowError(
+                        "Couldn’t create the Boundary line style",
+                        "Revit did not create the “Boundary” subcategory under Lines. Check that the project isn’t read-only, or create a line style named “Boundary” manually in Manage → Object Styles.");
+                    return;
                 }
-                else
+
+                // Set the properties for the Boundary line style
+                boundaryCategory.LineColor = new Color(0, 255, 0); // Green color
+                boundaryCategory.SetLineWeight(1, GraphicsStyleType.Projection); // Line weight 1
+
+                // Assign the "Solid" line pattern
+                LinePatternElement solidPattern = new FilteredElementCollector(doc)
+                    .OfClass(typeof(LinePatternElement))
+                    .Cast<LinePatternElement>()
+                    .FirstOrDefault(lp => lp.Name.Equals("Solid"));
+
+                if (solidPattern != null)
                 {
-                    TaskDialog.Show("Error", "Failed to create the Boundary line style.");
+                    boundaryCategory.SetLinePatternId(solidPattern.Id, GraphicsStyleType.Projection);
                 }
 
                 transaction.Commit();
+
+                MessageDialog.ShowSuccess(
+                    "Boundary line style created",
+                    "Draw detail lines with the “Boundary” style wherever walls or other objects should block a camera’s view, or use Trace walls in Settings to create them automatically.",
+                    solidPattern == null
+                        ? new List<MessageDialog.Item> { new MessageDialog.Item("Line pattern", "No “Solid” line pattern was found, so the style uses the project default. You can change it in Manage → Object Styles.") }
+                        : null);
             }
         }
         catch (Exception ex)
         {
-            TaskDialog.Show("Error", $"An error occurred during CreateBoundaryLine:\n{ex.Message}\n{ex.StackTrace}");
+            MessageDialog.ShowError(
+                "Couldn’t create the Boundary line style",
+                "Revit reported an error, so nothing was changed.",
+                ex);
         }
     }
     private void CreateFilledRegions()
     {
-        if (_uiDoc == null)
-        {
-            TaskDialog.Show("Error", "UIDocument is not initialized.");
-            return;
-        }
-
         Document doc = _uiDoc.Document;
 
         var filledRegionData = new Dictionary<string, Autodesk.Revit.DB.Color>
@@ -319,8 +408,10 @@ namespace Camera_FOV.Handlers
 
                 if (solidFillPattern == null)
                 {
-                    TaskDialog.Show("Error", "Solid fill pattern not found. Cannot create filled region types.");
                     transaction.RollBack();
+                    MessageDialog.ShowError(
+                        "Couldn’t create the DORI region types",
+                        "This project has no solid fill pattern, which the DORI regions use. Add a fill pattern with the “Solid fill” option in Manage → Additional Settings → Fill Patterns, then try again.");
                     return;
                 }
 
@@ -351,8 +442,10 @@ namespace Camera_FOV.Handlers
 
                     if (defaultRegionType == null)
                     {
-                        TaskDialog.Show("Error", "No default filled region type found. Cannot create new types.");
                         transaction.RollBack();
+                        MessageDialog.ShowError(
+                            "Couldn’t create the DORI region types",
+                            "The new types are copied from an existing filled region type, but this project has none. Create any filled region type (Annotate → Region → Filled Region), then try again.");
                         return;
                     }
 
@@ -369,22 +462,35 @@ namespace Camera_FOV.Handlers
 
                 transaction.Commit();
 
-                if (existingRegions.Any())
-                {
-                    MessageBox.Show("Filled regions already exist!", "Region types exist", MessageBoxButton.OK, MessageBoxImage.Information);
-
-                }
+                // One summary listing every DORI type and whether it was created or already there
+                var items = filledRegionData.Keys
+                    .Select(name => new MessageDialog.Item(name, createdRegions.Contains(name)
+                        ? "Created with a solid fill."
+                        : "Already in the project; left unchanged."))
+                    .ToList();
 
                 if (createdRegions.Any())
                 {
-                    MessageBox.Show("Filled regions created sucessfuly", "Success!", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageDialog.ShowSuccess(
+                        createdRegions.Count == filledRegionData.Count ? "DORI region types created" : "Missing DORI region types created",
+                        "Each ticked DORI level is drawn with its own filled region type.",
+                        items);
                 }
-
+                else
+                {
+                    MessageDialog.ShowInfo(
+                        "DORI region types already exist",
+                        "All four types are already in this project, so nothing was changed.",
+                        items);
+                }
             }
         }
         catch (Exception ex)
         {
-            TaskDialog.Show("Error", $"An error occurred while creating filled region types:\n{ex.Message}\n{ex.StackTrace}");
+            MessageDialog.ShowError(
+                "Couldn’t create the DORI region types",
+                "Revit reported an error, so nothing was changed.",
+                ex);
         }
     }
 
@@ -430,11 +536,6 @@ namespace Camera_FOV.Handlers
     // replaced; user-drawn Boundary lines are kept.
     private void TraceWallsAndDrawBoundary()
     {
-        if (_uiDoc == null)
-        {
-            TaskDialog.Show("Error", "UIDocument is not initialized.");
-            return;
-        }
 
         Document doc = _uiDoc.Document;
 
@@ -442,21 +543,27 @@ namespace Camera_FOV.Handlers
         {
             if (!(_uiDoc.ActiveView is ViewPlan view))
             {
-                TaskDialog.Show("Error", "Automatic boundary tracing requires an active plan view. The plan's view range decides which geometry is traced.");
+                MessageDialog.ShowWarning(
+                    "Tracing needs a plan view",
+                    "Walls are traced where they cross the plan’s cut plane, so the active view must be a floor or ceiling plan. Open a plan view, reopen Camera FOV there and try again.");
                 return;
             }
 
             TraceRange range = GetTraceRange(view);
             if (range == null)
             {
-                TaskDialog.Show("Error", "Could not resolve the cut plane of the active plan view.");
+                MessageDialog.ShowWarning(
+                    "Couldn’t find the cut plane",
+                    $"The view range of “{view.Name}” has no level for its cut plane. Check View Range in the view’s properties, then try again.");
                 return;
             }
 
             GraphicsStyle boundaryLineStyle = GetBoundaryLineStyle(doc);
             if (boundaryLineStyle == null)
             {
-                TaskDialog.Show("Error", "Line style 'Boundary' not found. Please create it first.");
+                MessageDialog.ShowWarning(
+                    "Boundary line style is missing",
+                    "Traced lines are drawn with the “Boundary” line style. Open Settings and click Create “Boundary” line style first, then trace again.");
                 return;
             }
 
@@ -472,7 +579,9 @@ namespace Camera_FOV.Handlers
 
             if (!elements.Any() && !selectedLinks.Any())
             {
-                TaskDialog.Show("Info", "No walls, columns, windows, curtain wall parts or selected linked models found.");
+                MessageDialog.ShowInfo(
+                    "Nothing to trace",
+                    $"No walls, columns, windows or curtain wall parts are visible in “{view.Name}”, and no linked models were chosen. Nothing was changed.");
                 return;
             }
 
@@ -501,7 +610,10 @@ namespace Camera_FOV.Handlers
         }
         catch (Exception ex)
         {
-            TaskDialog.Show("Error", $"An error occurred while tracing walls and columns:\n{ex.Message}");
+            MessageDialog.ShowError(
+                "Tracing failed",
+                "Revit reported an error while tracing, so no Boundary lines were changed.",
+                ex);
         }
     }
 
@@ -775,27 +887,35 @@ namespace Camera_FOV.Handlers
 
     private static void ShowTraceSummary(TraceSummary summary)
     {
-        var lines = new List<string>
-        {
-            $"Created {summary.LinesCreated} Boundary lines from {summary.ElementsTraced} elements crossing the view's cut plane."
-        };
+        var items = new List<MessageDialog.Item>();
 
         if (summary.LinesReplaced > 0)
-            lines.Add($"Replaced {summary.LinesReplaced} lines from the previous trace. Manually drawn Boundary lines were kept.");
-
-        if (summary.ElementsBelowOrAboveCut > 0)
-            lines.Add($"Skipped {summary.ElementsBelowOrAboveCut} elements inside the view range that do not reach the cut plane (for example low walls). Draw Boundary lines manually for any that should block the view.");
+            items.Add(new MessageDialog.Item("Previous trace replaced",
+                $"{summary.LinesReplaced} lines from the last trace were removed. Boundary lines you drew yourself were kept."));
 
         if (summary.LinksTraced > 0)
-            lines.Add($"Traced {summary.LinksTraced} linked models.");
+            items.Add(new MessageDialog.Item("Linked models", $"{summary.LinksTraced} linked models were traced as well."));
+
+        if (summary.ElementsBelowOrAboveCut > 0)
+            items.Add(new MessageDialog.Item("Not at the cut plane",
+                $"{summary.ElementsBelowOrAboveCut} elements in the view range don’t reach the cut plane (for example low walls) and were skipped. Draw Boundary lines manually for any that should block the view."));
 
         if (summary.LinksNotLoaded > 0)
-            lines.Add($"Skipped {summary.LinksNotLoaded} linked models that are not loaded.");
+            items.Add(new MessageDialog.Item("Links not loaded",
+                $"{summary.LinksNotLoaded} linked models are unloaded and were skipped. Reload them in Manage Links to include them."));
 
         if (summary.SectionFailures > 0)
-            lines.Add($"{summary.SectionFailures} solids could not be sectioned and were skipped.");
+            items.Add(new MessageDialog.Item("Geometry skipped",
+                $"{summary.SectionFailures} solids couldn’t be cut at the cut plane and were skipped. Check those areas and add Boundary lines by hand if needed."));
 
-        TaskDialog.Show("Boundary Tracing", string.Join("\n\n", lines));
+        string message = $"Created {summary.LinesCreated} Boundary lines from {summary.ElementsTraced} elements crossing the view’s cut plane.";
+        bool needsAttention = summary.ElementsBelowOrAboveCut > 0 || summary.LinksNotLoaded > 0 || summary.SectionFailures > 0;
+
+        MessageDialog.Show(
+            needsAttention ? MessageDialog.Kind.Info : MessageDialog.Kind.Success,
+            "Boundaries traced",
+            message,
+            items);
     }
 
     // Helper method to generate a hash for a curve based on its start and end points
@@ -884,7 +1004,9 @@ namespace Camera_FOV.Handlers
     {
         if (_cameraElement == null)
         {
-            TaskDialog.Show("Debug", "Camera element is null");
+            MessageDialog.ShowWarning(
+                "No camera to update",
+                "Select a camera in the Camera FOV window before its rotation and field of view can be written back.");
             return;
         }
 

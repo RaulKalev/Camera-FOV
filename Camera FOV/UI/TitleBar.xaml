@@ -13,7 +13,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
     <!--
-        Draggable caption area: app glyph + window title on the left, the familiar minimize / close buttons on the
+        Draggable caption area: window title on the left, the familiar minimize / close buttons on the
         right. Styles are DynamicResource because this control is parsed before it joins the window that merges the
         design system. A window places its own tool buttons over the free space (see MainWindow), because named
         elements cannot be passed into a XAML-defined UserControl.
@@ -51,17 +51,8 @@
             </Button>
         </StackPanel>
 
-        <Border Style="{DynamicResource GlyphTile}">
-            <materialDesign:PackIcon
-                Width="14"
-                Height="14"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Foreground="{DynamicResource Text.OnAccent}"
-                Kind="{Binding IconKind, RelativeSource={RelativeSource AncestorType={x:Type local:TitleBar}}}" />
-        </Border>
         <TextBlock
-            Margin="10,0,8,0"
+            Margin="4,0,8,0"
             Style="{DynamicResource Type.WindowTitle}"
             Text="{Binding Title, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
     </DockPanel>

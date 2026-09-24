@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using Newtonsoft.Json;
 using Camera_FOV.Models;
+using Camera_FOV.UI;
 
 
 namespace Camera_FOV.Services
@@ -39,7 +40,10 @@ namespace Camera_FOV.Services
             {
                 // Fallback to default settings in case of an error
                 Settings = new PluginSettings();
-                MessageBox.Show($"Failed to load settings. Default values will be used.\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageDialog.ShowError(
+                    "Couldn’t read the Camera FOV settings",
+                    $"Default values are used instead. The settings file is {SettingsFilePath}; it is rewritten the next time settings are saved.",
+                    ex);
             }
         }
 
@@ -53,7 +57,10 @@ namespace Camera_FOV.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to save settings.\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError(
+                    "Couldn’t save the Camera FOV settings",
+                    $"Changes won’t be remembered next time. Check that you can write to {Path.GetDirectoryName(SettingsFilePath)}.",
+                    ex);
             }
         }
     }

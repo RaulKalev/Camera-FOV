@@ -1,28 +1,17 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using MaterialDesignThemes.Wpf;
 
 namespace Camera_FOV
 {
     public partial class TitleBar : UserControl
     {
-        public static readonly DependencyProperty IconKindProperty = DependencyProperty.Register(
-            nameof(IconKind), typeof(PackIconKind), typeof(TitleBar), new PropertyMetadata(PackIconKind.Cctv));
-
         public static readonly DependencyProperty CanMinimizeProperty = DependencyProperty.Register(
             nameof(CanMinimize), typeof(bool), typeof(TitleBar), new PropertyMetadata(true));
 
         public TitleBar()
         {
             InitializeComponent();
-        }
-
-        /// <summary>Glyph shown in the app tile next to the title.</summary>
-        public PackIconKind IconKind
-        {
-            get => (PackIconKind)GetValue(IconKindProperty);
-            set => SetValue(IconKindProperty, value);
         }
 
         public bool CanMinimize

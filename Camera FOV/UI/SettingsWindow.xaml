@@ -36,8 +36,7 @@
             <DockPanel>
                 <local:TitleBar
                     CanMinimize="False"
-                    DockPanel.Dock="Top"
-                    IconKind="CogOutline" />
+                    DockPanel.Dock="Top" />
 
                 <!--  Footer: cancel leaves everything as it was; save applies the parameter names  -->
                 <Border

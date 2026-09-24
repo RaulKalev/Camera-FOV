@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Autodesk.Revit.UI;
+using Camera_FOV.UI;
 
 
 namespace Camera_FOV.Utils
@@ -139,7 +140,11 @@ namespace Camera_FOV.Utils
         {
             if (_currentPosition == null || _filledRegionTypeId == null)
             {
-                TaskDialog.Show("Error", "Camera position or filled region type is not set.");
+                MessageDialog.ShowWarning(
+                    "Can’t draw this DORI level",
+                    _currentPosition == null
+                        ? "No camera position is set. Select a camera and draw again."
+                        : "Its filled region type is missing from the project. Open Settings and click Create DORI region types.");
                 return ElementId.InvalidElementId;
             }
 
@@ -277,7 +282,11 @@ namespace Camera_FOV.Utils
             }
 
             // If all attempts fail
-            TaskDialog.Show("Warning", $"Could not generate a valid filled region boundary even after relaxing resolution.\nLast Error: {lastError}\n\nThe FOV geometry might be too complex or self-intersecting.");
+            MessageDialog.Show(
+                MessageDialog.Kind.Warning,
+                "Couldn’t draw the coverage region",
+                "Revit rejected the coverage outline at every resolution tried. This usually happens when Boundary lines create a very complex or self-intersecting shape near the camera. Simplify or tidy the Boundary lines around the camera, or move Region resolution towards Faster in Settings, then draw again.",
+                details: lastError);
             return ElementId.InvalidElementId;
         }
 

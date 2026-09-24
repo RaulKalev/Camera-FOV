@@ -54,6 +54,14 @@
     <SolidColorBrush x:Key="Accent.Text" Color="#FF0063CC" />
     <SolidColorBrush x:Key="Focus.Ring" Color="#FF007AFF" />
 
+    <!--  Status  -->
+    <SolidColorBrush x:Key="Status.Warning" Color="#FFC93400" />
+    <SolidColorBrush x:Key="Status.WarningSubtle" Color="#26FF9500" />
+    <SolidColorBrush x:Key="Status.Error" Color="#FFD70015" />
+    <SolidColorBrush x:Key="Status.ErrorSubtle" Color="#1FFF3B30" />
+    <SolidColorBrush x:Key="Status.Success" Color="#FF248A3D" />
+    <SolidColorBrush x:Key="Status.SuccessSubtle" Color="#2634C759" />
+
     <!--  Lists  -->
     <SolidColorBrush x:Key="Row.Hover" Color="#0D000000" />
 

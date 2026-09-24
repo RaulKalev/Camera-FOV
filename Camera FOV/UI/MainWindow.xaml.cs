@@ -19,6 +19,7 @@ using Camera_FOV.Utils;
 using Camera_FOV.Handlers;
 using Camera_FOV.Services;
 using Camera_FOV.Models;
+using Camera_FOV.UI;
 
 namespace Camera_FOV
 {
@@ -49,7 +50,6 @@ namespace Camera_FOV
         private bool _applyConditionalOffset = false; // Flag for conditional 180 correction
 
         private DrawingEventHandler _drawingEventHandler;
-        private ExternalEvent _externalEvent;
         private Dictionary<CheckBox, string> _doriRegionMapping;
 
         private bool _isProcessingUpdate = false;
@@ -59,7 +59,7 @@ namespace Camera_FOV
         {
             if (_doc == null || _currentView == null)
             {
-                MessageBox.Show("Document or View is not properly initialized.", "Initialization Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Camera FOV couldn’t start", "The active project or view could not be read. Open a plan view and start Camera FOV again.");
                 return;
             }
 
@@ -67,10 +67,34 @@ namespace Camera_FOV
                 _drawingTools = new DrawingTools(_doc, _currentView);
 
             if (_drawingEventHandler == null)
+            {
                 _drawingEventHandler = new DrawingEventHandler();
+                _drawingEventHandler.SetMainWindow(this);
+            }
+        }
 
-            if (_externalEvent == null)
-                _externalEvent = ExternalEvent.Create(_drawingEventHandler);
+        // Hands the request to Revit. Failures of explicit actions are reported; a preview that
+        // could not be sent is simply superseded by the next one.
+        private void SendRequest(DrawingRequest request)
+        {
+            if (_drawingEventHandler == null || _drawingTools == null) return;
+
+            if (!_drawingEventHandler.Enqueue(request, out string error) && !request.IsPreview)
+            {
+                MessageDialog.ShowWarning("Revit didn’t accept the request", error, owner: this);
+            }
+        }
+
+        private void SendPreviewUpdate()
+        {
+            if (_drawingTools == null) return;
+
+            SendRequest(new DrawingRequest(
+                DrawingEventHandler.DrawingAction.Update,
+                _drawingTools,
+                position: _selectedCameraPosition,
+                maxDistance: ParseMaxDistance(),
+                rotationAngle: GetFinalRotationAngle()));
         }
 
 
@@ -81,15 +105,8 @@ namespace Camera_FOV
                 CheckboxRecognition.IsChecked == true ||
                 CheckboxIdentification.IsChecked == true)
             {
-                if (double.TryParse(MaxDistanceTextBox.Text.Replace(" m", ""), out double maxDistance))
-                {
-                    return maxDistance;
-                }
-                else
-                {
-                    MessageBox.Show("Invalid Max Distance value.", "Input Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return 0;
-                }
+                // Invalid input is reported when the user draws, not on every keystroke of the preview
+                return double.TryParse(MaxDistanceTextBox.Text.Replace(" m", ""), out double maxDistance) ? maxDistance : 0;
             }
             else
             {
@@ -109,12 +126,7 @@ namespace Camera_FOV
 
         private void UpdateDetailLine(bool showMessage = true)
         {
-
-            double maxDistance = ParseMaxDistance();
-            double rotationAngle = GetFinalRotationAngle();
-
-            _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.Update, _selectedCameraPosition, maxDistance, rotationAngle);
-            _externalEvent.Raise();
+            SendPreviewUpdate();
         }
         public MainWindow(UIDocument uiDoc, Document doc, View currentView)
         {
@@ -140,16 +152,9 @@ namespace Camera_FOV
                     userRotationAngle = value;
 
                     // Trigger detail line update
-                    if (_isInitialized && _selectedCameraPosition != null && _externalEvent != null)
+                    if (_isInitialized && _selectedCameraPosition != null)
                     {
-                        double maxDistance = ParseMaxDistance();
-                        double rotationAngle = GetFinalRotationAngle();
-
-                        _drawingTools.SetParameters(_selectedCameraPosition, maxDistance, rotationAngle);
-
-                        // Trigger the external event
-                        _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.Update, _selectedCameraPosition, maxDistance, rotationAngle);
-                        _externalEvent.Raise();
+                        SendPreviewUpdate();
                     }
                 }
                 else
@@ -160,6 +165,7 @@ namespace Camera_FOV
 
             Topmost = true;
             this.Closed += MainWindow_Closed;
+            MessageDialog.DefaultOwner = this; // Messages from Revit-side actions centre on this window
 
             _windowResizer = new WindowResizer(this);
             this.MouseMove += Window_MouseMove;
@@ -187,12 +193,7 @@ namespace Camera_FOV
             CheckboxRecognition.Unchecked += (s, e) => UpdateMaxDistance();
             CheckboxIdentification.Unchecked += (s, e) => UpdateMaxDistance();
 
-            InitializeDrawingTools();
             InitializeDoriRegionMapping();
-
-            _drawingEventHandler = new DrawingEventHandler();
-            _drawingEventHandler.SetMainWindow(this);
-            _externalEvent = ExternalEvent.Create(_drawingEventHandler);
 
             LoadSettings();
 
@@ -225,7 +226,7 @@ namespace Camera_FOV
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to save settings: {ex.Message}", "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t save your settings", "Your field of view, resolution and theme choices won’t be remembered next time.", ex);
             }
         }
 
@@ -251,7 +252,7 @@ namespace Camera_FOV
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to load settings: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t load your settings", "The window opened with default values instead.", ex, this);
             }
         }
 
@@ -259,8 +260,12 @@ namespace Camera_FOV
         {
             SaveSettings();
 
-            _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.Delete);
-            _externalEvent.Raise();
+            if (MessageDialog.DefaultOwner == this)
+                MessageDialog.DefaultOwner = null;
+
+            // Removes the preview line after any actions still waiting, then stops accepting requests
+            if (_drawingEventHandler != null && _drawingTools != null)
+                _drawingEventHandler.Close(new DrawingRequest(DrawingEventHandler.DrawingAction.Delete, _drawingTools));
         }
 
 
@@ -284,6 +289,24 @@ namespace Camera_FOV
         {
             UpdateMaxDistance();
         }
+        // Accepts "93.5" and, for comma-decimal locales, "93,5". Valid range is (0, 360] degrees.
+        private static bool TryParseFov(string text, out double fov)
+        {
+            text = text?.Trim();
+            bool parsed = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out fov)
+                || double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out fov);
+            return parsed && fov > 0 && fov <= 360;
+        }
+
+        private bool TryGetSelectedResolution(out int resolution)
+        {
+            resolution = 0;
+            object selected = ResolutionComboBox.SelectedItem is ComboBoxItem item ? item.Content : ResolutionComboBox.SelectedItem;
+            return selected != null
+                && int.TryParse(selected.ToString().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out resolution)
+                && resolution > 0;
+        }
+
         private decimal CalculateDORIDistance(int resolution, decimal fov, decimal ppm)
         {
             decimal A = resolution / ppm;
@@ -332,13 +355,13 @@ namespace Camera_FOV
                     return;
                 }
 
-                if (!decimal.TryParse(FOVAngleTextBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal fov) || fov <= 0)
+                if (!TryParseFov(FOVAngleTextBox.Text, out double fov))
                 {
                     MaxDistanceTextBox.Text = "Invalid FOV";
                     return;
                 }
 
-                decimal? distance = GetSelectedDORIDistance(resolution, fov);
+                decimal? distance = GetSelectedDORIDistance(resolution, (decimal)fov);
                 if (distance.HasValue)
                 {
                     MaxDistanceTextBox.Text = $"{distance.Value} m";
@@ -350,7 +373,7 @@ namespace Camera_FOV
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error updating max distance: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t calculate the max distance", "Check the field of view and resolution values.", ex, this);
             }
         }
         private double GetFinalRotationAngle()
@@ -635,14 +658,7 @@ namespace Camera_FOV
                         }
 
                         // Continue with drawing updates if needed
-                        if (_externalEvent != null)
-                        {
-                            double maxDistance = ParseMaxDistance();
-                            double rotationAngle = GetFinalRotationAngle();
-
-                            _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.Update, _selectedCameraPosition, maxDistance, rotationAngle);
-                            _externalEvent.Raise();
-                        }
+                        SendPreviewUpdate();
                     }
                 }
 
@@ -657,7 +673,7 @@ namespace Camera_FOV
                 this.Show();
                 this.Topmost = true;
                 this.Activate();
-                MessageBox.Show("Selection canceled by user.", "Canceled", MessageBoxButton.OK, MessageBoxImage.Warning);
+                // Pressing Esc is a deliberate choice, so no message
             }
             catch (Exception ex)
             {
@@ -665,7 +681,7 @@ namespace Camera_FOV
                 this.Show();
                 this.Topmost = true;
                 this.Activate();
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t select the camera", "Something went wrong while reading the selected camera. Try selecting it again.", ex, this);
             }
         }
 
@@ -676,7 +692,9 @@ namespace Camera_FOV
             string typeName = _doc.GetElement(camera.GetTypeId())?.Name;
             CameraStatusTitle.Text = string.IsNullOrWhiteSpace(typeName) ? camera.Name : typeName;
             CameraStatusTitle.ToolTip = CameraStatusTitle.Text;
-            CameraStatusDetail.Text = $"Element ID {camera.Id}";
+            string familyName = (camera as FamilyInstance)?.Symbol?.FamilyName;
+            CameraStatusDetail.Text = familyName ?? string.Empty;
+            CameraStatusDetail.Visibility = string.IsNullOrWhiteSpace(familyName) ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
             CameraStatusIcon.SetResourceReference(ForegroundProperty, "Accent.Text");
             SelectElementsButton.Content = "Change";
         }
@@ -685,28 +703,47 @@ namespace Camera_FOV
         {
             try
             {
+                // Check every input first and report all problems together, so one fix-up round is enough
+                var problems = new List<MessageDialog.Item>();
+
                 if (_selectedCameraPosition == null)
                 {
-                    MessageBox.Show("No camera selected. Please select a camera position.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
+                    problems.Add(new MessageDialog.Item("Camera",
+                        "No camera is selected. Click Select and pick a camera (security device) in the view."));
                 }
 
-                var doriLayers = new List<DoriLayerConfig>();
-                
-                // Parse resolution from ComboBox
-                double resolution = 1920;
-                if (ResolutionComboBox.SelectedItem is ComboBoxItem item && 
-                    double.TryParse(item.Content.ToString(), out double res))
+                if (!TryGetSelectedResolution(out int resolution))
                 {
-                    resolution = res;
-                }
-                else if (ResolutionComboBox.SelectedItem != null && 
-                         double.TryParse(ResolutionComboBox.SelectedItem.ToString(), out double res2))
-                {
-                    resolution = res2;
+                    problems.Add(new MessageDialog.Item("Horizontal resolution",
+                        "Choose the camera's horizontal resolution in pixels from the list, for example 1920 or 3840."));
                 }
 
-                double fovAngle = double.TryParse(FOVAngleTextBox.Text, out double f) ? f : 90.0;
+                if (!TryParseFov(FOVAngleTextBox.Text, out double fovAngle))
+                {
+                    problems.Add(new MessageDialog.Item("Field of view",
+                        $"“{FOVAngleTextBox.Text}” is not a valid angle. Enter the horizontal field of view in degrees, above 0 and up to 360 (for example 93)."));
+                }
+
+                if (!double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double userRotation))
+                {
+                    problems.Add(new MessageDialog.Item("Rotation",
+                        $"“{RotationAngleTextBox.Text}” is not a number. Enter the rotation in degrees, for example 0 or -45."));
+                }
+
+                // (checkbox, region type name, pixels per foot, draws the angular dimension)
+                var selectedLevels = new[]
+                {
+                    (Box: CheckboxDetection, TypeName: "dori_25px", Ppf: 7.62m, Dimension: false),
+                    (Box: CheckboxObservation, TypeName: "dori_63px", Ppf: 19.2024m, Dimension: false),
+                    (Box: CheckboxRecognition, TypeName: "dori_125px", Ppf: 38.1m, Dimension: false),
+                    (Box: CheckboxIdentification, TypeName: "dori_250px", Ppf: 76.2m, Dimension: true)
+                }.Where(l => l.Box.IsChecked == true).ToList();
+
+                if (selectedLevels.Count == 0)
+                {
+                    problems.Add(new MessageDialog.Item("DORI coverage",
+                        "Tick at least one level: Detection, Observation, Recognition or Identification."));
+                }
 
                 // Function to get FilledRegionType ID by partial name
                 ElementId GetTypeId(string namePart)
@@ -718,32 +755,31 @@ namespace Camera_FOV
                     return type?.Id;
                 }
 
-                if (CheckboxDetection.IsChecked == true)
+                List<string> missingTypes = selectedLevels.Where(l => GetTypeId(l.TypeName) == null).Select(l => l.TypeName).ToList();
+                if (missingTypes.Any())
                 {
-                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 7.62m);
-                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_25px"), DrawDimension = false });
-                }
-                if (CheckboxObservation.IsChecked == true)
-                {
-                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 19.2024m);
-                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_63px"), DrawDimension = false });
-                }
-                if (CheckboxRecognition.IsChecked == true)
-                {
-                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 38.1m);
-                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_125px"), DrawDimension = false });
-                }
-                if (CheckboxIdentification.IsChecked == true)
-                {
-                    decimal dist = CalculateDORIDistance((int)resolution, (decimal)fovAngle, 76.2m);
-                    doriLayers.Add(new DoriLayerConfig { Distance = (double)dist, TypeId = GetTypeId("dori_250px"), DrawDimension = true });
+                    problems.Add(new MessageDialog.Item("Region types",
+                        $"This project has no filled region type for {string.Join(", ", missingTypes)}. Open Settings and click Create DORI region types."));
                 }
 
-                if (doriLayers.Count == 0)
+                if (problems.Any())
                 {
-                    MessageBox.Show("Please select at least one DORI option.", "No Selection", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageDialog.ShowWarning(
+                        "Can’t draw the coverage yet",
+                        problems.Count == 1 ? "Fix this and press Draw coverage again." : "Fix these and press Draw coverage again.",
+                        problems,
+                        this);
                     return;
                 }
+
+                var doriLayers = selectedLevels
+                    .Select(l => new DoriLayerConfig
+                    {
+                        Distance = (double)CalculateDORIDistance(resolution, (decimal)fovAngle, l.Ppf),
+                        TypeId = GetTypeId(l.TypeName),
+                        DrawDimension = l.Dimension
+                    })
+                    .ToList();
 
                 // Sort layers by Distance Descending (Largest to Smallest)
                 // This ensures Detection (Large) is drawn first (at bottom), Identification (Small) last (top).
@@ -752,26 +788,23 @@ namespace Camera_FOV
                 double rotationAngle = GetFinalRotationAngle();
                 // Pass the implementation list 
 
-                _drawingEventHandler.Setup(
-                    _drawingTools,
+                SendRequest(new DrawingRequest(
                     DrawingEventHandler.DrawingAction.DrawFilledRegion,
+                    _drawingTools,
+                    _selectedCameraElement,
                     _selectedCameraPosition,
                     doriLayers.First().Distance, // Max distance for legacy use
                     rotationAngle,
                     fovAngle,
                     doriLayers.First().TypeId, // Legacy type
                     _sliderResolution, // Corrected: Use slider value (degrees), not camera pixels
-                    _selectedCameraElement,
-                    double.TryParse(RotationAngleTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double val) ? val : 0,
-                    doriLayers // New list
-                );
-
-                _drawingEventHandler.DrawAngularDimension = (CheckboxIdentification.IsChecked == true);
-                _externalEvent.Raise();
+                    userRotation,
+                    doriLayers,
+                    CheckboxIdentification.IsChecked == true));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t draw the coverage", "Something went wrong while preparing the drawing, so nothing was changed.", ex, this);
             }
         }
 
@@ -779,12 +812,11 @@ namespace Camera_FOV
         {
             try
             {
-                _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.UndoFilledRegion);
-                _externalEvent.Raise();
+                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.UndoFilledRegion, _drawingTools));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred while undoing: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t undo the coverage", "The undo request couldn’t be sent to Revit.", ex, this);
             }
         }
 
@@ -830,16 +862,7 @@ namespace Camera_FOV
                     return;
                 }
 
-                double maxDistance = ParseMaxDistance();
-                double rotationAngle = GetFinalRotationAngle();
-
-                _drawingTools.SetParameters(_selectedCameraPosition, maxDistance, rotationAngle);
-
-                if (_externalEvent != null)
-                {
-                    _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.Update, _selectedCameraPosition, maxDistance, rotationAngle);
-                    _externalEvent.Raise();
-                }
+                SendPreviewUpdate();
             }
             finally
             {
@@ -850,12 +873,11 @@ namespace Camera_FOV
         {
             try
             {
-                _drawingEventHandler.SetupBoundaryLineCreation(_uiDoc);
-                _externalEvent.Raise();
+                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CreateBoundaryLine, _drawingTools));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t create the Boundary line style", "The request couldn’t be sent to Revit.", ex);
             }
         }
 
@@ -863,12 +885,11 @@ namespace Camera_FOV
         {
             try
             {
-                _drawingEventHandler.SetupCreateFilledRegions(_uiDoc);
-                _externalEvent.Raise();
+                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.CreateFilledRegions, _drawingTools));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t create the DORI region types", "The request couldn’t be sent to Revit.", ex);
             }
         }
 
@@ -876,12 +897,11 @@ namespace Camera_FOV
         {
             try
             {
-                _drawingEventHandler.SetupTraceWallsAndDrawBoundary(_uiDoc);
-                _externalEvent.Raise();
+                SendRequest(new DrawingRequest(DrawingEventHandler.DrawingAction.TraceWallsAndDrawBoundary, _drawingTools));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t start tracing", "The trace request couldn’t be sent to Revit.", ex);
             }
         }
 
@@ -912,24 +932,19 @@ namespace Camera_FOV
                     double newAngle = currentAngle + delta;
                     RotationAngleTextBox.Text = newAngle.ToString(CultureInfo.InvariantCulture);
 
-                    if (_isInitialized && _selectedCameraPosition != null && _externalEvent != null)
+                    if (_isInitialized && _selectedCameraPosition != null)
                     {
-                        double maxDistance = ParseMaxDistance();
-                        double rotationAngle = GetFinalRotationAngle();
-
-                        _drawingTools.SetParameters(_selectedCameraPosition, maxDistance, rotationAngle);
-                        _drawingEventHandler.Setup(_drawingTools, DrawingEventHandler.DrawingAction.Update, _selectedCameraPosition, maxDistance, rotationAngle);
-                        _externalEvent.Raise();
+                        SendPreviewUpdate();
                     }
                 }
                 else
                 {
-                    MessageBox.Show("Invalid rotation angle. Please enter a valid number.", "Input Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageDialog.ShowWarning("Rotation isn’t a number", $"“{RotationAngleTextBox.Text}” can’t be nudged. Enter the rotation in degrees, for example 0 or -45, then use the buttons again.", owner: this);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred while updating the rotation angle: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageDialog.ShowError("Couldn’t rotate the camera", "The preview couldn’t be updated with the new angle.", ex, this);
             }
         }
         public void NotifyFilledRegionsCreated()

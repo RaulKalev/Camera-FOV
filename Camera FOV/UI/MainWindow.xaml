@@ -33,7 +33,7 @@
         <Border Style="{StaticResource Window.Surface}">
             <DockPanel>
                 <Grid DockPanel.Dock="Top">
-                    <local:TitleBar IconKind="Cctv" />
+                    <local:TitleBar />
                     <!--  Window tools, placed just before the title bar's minimize / close buttons  -->
                     <StackPanel
                         Margin="0,0,72,0"
