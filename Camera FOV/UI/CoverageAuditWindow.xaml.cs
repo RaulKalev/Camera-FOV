@@ -79,7 +79,9 @@ namespace Camera_FOV.UI
             Title = $"Coverage audit · {data.ViewName}";
 
             SetUpGrid();
-            LevelSelector.Children.OfType<RadioButton>().First(b => b.Tag?.ToString() == "-1").IsChecked = true; // Opens on Best level
+            // Opens on the best level, or on the categories when nothing is drawn yet
+            string opening = data.Regions.Any() ? "-1" : "-2";
+            LevelSelector.Children.OfType<RadioButton>().First(b => b.Tag?.ToString() == opening).IsChecked = true;
         }
 
         private void EnsureSights()
@@ -90,6 +92,35 @@ namespace Camera_FOV.UI
             _sights = CategoryCoverage.Cast(_data, _sightFormula, SettingsManager.Settings.Resolution, out _skipped);
             _sightOutlines = _sights.Select(s => s.Outline(CameraData.Categories[0].PixelsPerMeter)).ToList();
             _bestDensity = null;
+        }
+
+        // ------------------------------------------------------------------
+        // Documents (issues #19, #17, #15)
+        // ------------------------------------------------------------------
+
+        private RecordingStorageWindow _storageWindow;
+
+        private void StorageButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_storageWindow != null && _storageWindow.IsLoaded)
+            {
+                _storageWindow.Activate();
+                return;
+            }
+            _storageWindow = new RecordingStorageWindow(_data) { Owner = this };
+            _storageWindow.Show();
+        }
+
+        private void TestPlanButton_Click(object sender, RoutedEventArgs e)
+        {
+            EnsureSights();
+            ExportTestPlan();
+        }
+
+        private void ScheduleButton_Click(object sender, RoutedEventArgs e)
+        {
+            EnsureSights();
+            ExportSchedule();
         }
 
         private IEnumerable<AuditRegion> IncludedRegions()

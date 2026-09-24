@@ -1,0 +1,123 @@
+<Window
+    x:Class="Camera_FOV.UI.RecordingStorageWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:Camera_FOV"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Recording storage"
+    Width="760"
+    Height="700"
+    MinWidth="620"
+    MinHeight="480"
+    AllowsTransparency="True"
+    Background="Transparent"
+    ResizeMode="CanResize"
+    ShowInTaskbar="False"
+    TextOptions.TextFormattingMode="Display"
+    UseLayoutRounding="True"
+    WindowStartupLocation="CenterOwner"
+    WindowStyle="None"
+    mc:Ignorable="d">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome
+            CaptionHeight="0"
+            CornerRadius="0"
+            GlassFrameThickness="0"
+            ResizeBorderThickness="18"
+            UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/DarkTheme.xaml" />
+                <ResourceDictionary Source="Themes/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid
+        Margin="16"
+        TextElement.FontFamily="{StaticResource Font.Text}"
+        TextElement.FontSize="{StaticResource FontSize.Body}"
+        TextElement.Foreground="{DynamicResource Text.Primary}">
+        <Border Style="{StaticResource Window.Shadow}" />
+        <Border Style="{StaticResource Window.Surface}">
+            <DockPanel x:Name="ContentRoot">
+                <local:TitleBar CanMinimize="False" DockPanel.Dock="Top" />
+
+                <!--  Totals and saving  -->
+                <Border
+                    Padding="16,12"
+                    BorderBrush="{DynamicResource Separator}"
+                    BorderThickness="0,1,0,0"
+                    DockPanel.Dock="Bottom">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="TotalText"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Style="{StaticResource Type.Body}"
+                            TextWrapping="Wrap" />
+                        <StackPanel
+                            Grid.Column="1"
+                            Margin="16,0,0,0"
+                            Orientation="Horizontal">
+                            <Button
+                                Click="CloseButton_Click"
+                                Content="Close"
+                                IsCancel="True"
+                                Style="{StaticResource Button.Secondary}" />
+                            <Button
+                                x:Name="SaveButton"
+                                MinWidth="80"
+                                Margin="8,0,0,0"
+                                Click="SaveButton_Click"
+                                Content="Save to project"
+                                Style="{StaticResource Button.Primary}"
+                                ToolTip="Keep this recording plan in the project, for next time and for the camera schedule export" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <ScrollViewer
+                    Margin="16,0,16,12"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="0,0,6,0">
+                        <TextBlock
+                            Style="{StaticResource Type.Secondary}"
+                            Text="One recording schedule per camera type in this view. Enter the data rates from the camera’s datasheet or the recorder; the starting values are only typical figures. Storage follows IEC 62676-4:2026, chapter 10: video T = c × s × p × d / 98 TB, M-JPEG T = c × i × f × p × d / 12 427 TB."
+                            TextWrapping="Wrap" />
+
+                        <Border
+                            Margin="0,12,0,0"
+                            Style="{StaticResource Card}">
+                            <Grid Style="{StaticResource CardRow}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Style="{StaticResource Type.Body}" Text="Public holidays per year, recorded like Sundays" />
+                                <TextBox
+                                    x:Name="HolidaysBox"
+                                    Grid.Column="1"
+                                    Width="72"
+                                    AutomationProperties.Name="Public holidays per year"
+                                    Style="{StaticResource Input.Value}" />
+                            </Grid>
+                        </Border>
+
+                        <StackPanel x:Name="GroupsPanel" />
+                    </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

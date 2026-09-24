@@ -15,6 +15,7 @@ Camera FOV turns a camera family into coverage areas for the four DORI levels (D
 - **Keep drawings up to date.** Move or rotate a camera and the plugin shows that its coverage is out of date. Press **Update** to redraw it.
 - **Check a spot.** Click a point in the plan to see which cameras cover it, how many pixels per metre each gives, and why the others don't.
 - **Audit a whole floor.** See gaps and overlaps of all cameras at once, per DORI level, against the rooms on that floor. The **IEC categories** view shows the observation categories of IEC 62676-4:2026, and **Requirements** checks rooms and spaces that have a required category (a text parameter "Required category", e.g. `Validate`).
+- **Plan recording storage.** **Recording storage** in the audit works out the storage and network load from a recording schedule per camera type (hours per weekday, Saturday and Sunday, continuous or on motion, data rates, days kept), with the formulas of IEC 62676-4:2026, chapter 10. The plan is saved in the project.
 
 <p align="center">
   <img src="docs/images/coverage-audit.png" alt="Coverage audit showing the best DORI level across a floor" width="720">

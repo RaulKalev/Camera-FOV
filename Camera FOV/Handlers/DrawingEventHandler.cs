@@ -1854,14 +1854,19 @@ namespace Camera_FOV.Handlers
         TraceRange range = GetTraceRange(view);
         AuditData data = CoverageAudit.Collect(doc, view, range?.CutZ ?? (view.GenLevel?.ProjectElevation ?? 0) + 4);
 
-        if (!data.Regions.Any())
+        if (!data.Regions.Any() && !data.Cameras.Any())
         {
             MessageDialog.ShowInfo(
-                "No coverage to audit",
-                $"No camera coverage drawn by Camera FOV was found in “{view.Name}”." +
+                "Nothing to audit",
+                $"No cameras or camera coverage were found in “{view.Name}”." +
                 (data.UntaggedDoriRegions > 0 ? $" {data.UntaggedDoriRegions} DORI regions aren’t linked to a camera; redraw them to include them." : string.Empty));
             return;
         }
+
+        // How the cameras record (issue #19), saved back to the project from the storage window
+        data.RecordingPlanJson = RecordingPlanStorage.Load(doc);
+        MainWindow owner = _mainWindow;
+        data.SaveRecordingPlan = json => owner?.SaveRecordingPlan(json);
 
         var window = new CoverageAuditWindow(data);
         if (_mainWindow != null && _mainWindow.IsVisible) window.Owner = _mainWindow;

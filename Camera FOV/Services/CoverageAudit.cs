@@ -30,6 +30,7 @@ namespace Camera_FOV.Services
         public ObservationCategory IntendedCategory; // What it is for (issue #14)
         public string RiskGrade;
         public double? FrameRate; // Frames per second (issue #18)
+        public string Mark, FamilyName, TypeName, LevelName; // For the camera schedule (issue #15)
         public CoverageState State;
     }
 
@@ -61,6 +62,9 @@ namespace Camera_FOV.Services
         public int LinkedRoomSources;
         public List<AuditZone> Zones = new List<AuditZone>();      // Rooms and spaces with a required category (issue #13)
         public List<string> UnreadableZones = new List<string>();  // Their required category isn't one of the categories
+        public string ProjectName;
+        public string RecordingPlanJson;                   // The project's recording plan (issue #19)
+        public Action<string> SaveRecordingPlan;           // Writes it back to the project
     }
 
     /// <summary>
@@ -71,7 +75,7 @@ namespace Camera_FOV.Services
     {
         public static AuditData Collect(Document doc, ViewPlan view, double cutZ)
         {
-            var data = new AuditData { ViewName = view.Name };
+            var data = new AuditData { ViewName = view.Name, ProjectName = doc.Title };
 
             // Every filled region owned by the view, including hidden ones, so they can be counted
             var regions = new FilteredElementCollector(doc)
@@ -188,6 +192,10 @@ namespace Camera_FOV.Services
             auditCamera.IntendedCategory = category;
             auditCamera.RiskGrade = grade;
             auditCamera.FrameRate = FrameRates.Read(camera);
+            auditCamera.Mark = camera.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)?.AsString() ?? string.Empty;
+            auditCamera.TypeName = camera.Document.GetElement(camera.GetTypeId())?.Name ?? camera.Name;
+            auditCamera.FamilyName = (camera as FamilyInstance)?.Symbol?.FamilyName ?? string.Empty;
+            auditCamera.LevelName = camera.Document.GetElement(camera.LevelId) is Level level ? level.Name : string.Empty;
         }
 
         // Rooms and MEP spaces whose height range contains the plan's cut plane, with their boundaries

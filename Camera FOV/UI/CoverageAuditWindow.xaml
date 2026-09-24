@@ -61,14 +61,36 @@
                             <RadioButton Checked="Level_Checked" Content="Requirements" GroupName="AuditLevel" Style="{StaticResource Segment}" Tag="-3" ToolTip="Rooms and spaces with a required observation category: where it is met and where it falls short" />
                         </UniformGrid>
                     </Border>
-                    <CheckBox
-                        x:Name="IncludeOutdatedCheckBox"
-                        Margin="0,10,0,0"
-                        Checked="Options_Changed"
-                        Style="{StaticResource Input.Check}"
-                        Unchecked="Options_Changed">
-                        <TextBlock Style="{StaticResource Type.Body}" Text="Include coverage that is out of date or needs review" />
-                    </CheckBox>
+                    <DockPanel Margin="0,10,0,0">
+                        <!--  Documents made from the view's cameras (issues #19, #17, #15)  -->
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button
+                                Click="StorageButton_Click"
+                                Content="Recording storage"
+                                Style="{StaticResource Button.Small}"
+                                ToolTip="Work out the recording storage and network load from a recording schedule per camera type" />
+                            <Button
+                                Margin="6,0,0,0"
+                                Click="TestPlanButton_Click"
+                                Content="Test plan"
+                                Style="{StaticResource Button.Small}"
+                                ToolTip="Export an acceptance test plan: where to test, which camera and what it must show" />
+                            <Button
+                                Margin="6,0,0,0"
+                                Click="ScheduleButton_Click"
+                                Content="Camera schedule"
+                                Style="{StaticResource Button.Small}"
+                                ToolTip="Export a camera schedule for design and handover documentation" />
+                        </StackPanel>
+                        <CheckBox
+                            x:Name="IncludeOutdatedCheckBox"
+                            VerticalAlignment="Center"
+                            Checked="Options_Changed"
+                            Style="{StaticResource Input.Check}"
+                            Unchecked="Options_Changed">
+                            <TextBlock Style="{StaticResource Type.Body}" Text="Include out-of-date coverage" />
+                        </CheckBox>
+                    </DockPanel>
                 </StackPanel>
 
                 <!--  Summary, legend and the clicked point  -->

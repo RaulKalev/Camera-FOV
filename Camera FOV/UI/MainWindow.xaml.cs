@@ -99,6 +99,25 @@ namespace Camera_FOV
             _cameraTypesWindow.Show();
         }
 
+        // Stores the recording plan edited in the storage window (issue #19) in the project
+        public void SaveRecordingPlan(string json)
+        {
+            Document doc = _doc;
+            bool queued = _revitActions != null && _revitActions.Enqueue("save the recording plan", app =>
+            {
+                if (!doc.IsValidObject) return;
+                using (var transaction = new Transaction(doc, "Camera recording plan"))
+                {
+                    transaction.Start();
+                    RecordingPlanStorage.Save(doc, json);
+                    transaction.Commit();
+                }
+            }, out string error);
+
+            if (!queued)
+                MessageDialog.ShowWarning("The recording plan wasn’t saved", "Revit didn’t accept the request. Try again.", owner: this);
+        }
+
         // The selected camera's type may have been created or updated from the library
         private void RefreshCameraTypeLimits()
         {
