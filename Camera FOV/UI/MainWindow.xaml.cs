@@ -24,9 +24,7 @@ namespace Camera_FOV
 {
     public partial class MainWindow : Window
     {
-        private const string ConfigFilePath = @"C:\ProgramData\RK Tools\Camera FOV\config.json";
         private readonly WindowResizer _windowResizer;
-        private bool _isDarkMode = true;
         private readonly UIDocument _uiDoc;
         private readonly Document _doc;
         private readonly View _currentView;
@@ -172,8 +170,8 @@ namespace Camera_FOV
                 Application.ResourceAssembly = Assembly.GetExecutingAssembly();
             }
 
-            LoadThemeState();
-            LoadTheme();
+            ThemeManager.Register(this);
+            Loaded += (s, e) => Motion.Reveal(ContentRoot);
 
             this.WindowStartupLocation = WindowStartupLocation.CenterScreen;
             FOVAngleTextBox.TextChanged += (s, e) => UpdateMaxDistance();
@@ -249,8 +247,7 @@ namespace Camera_FOV
                     }
                 }
 
-                ThemeToggleButton.IsChecked = settings.IsDarkMode;
-                LoadTheme();
+                ThemeToggleButton.IsChecked = ThemeManager.IsDarkMode;
             }
             catch (Exception ex)
             {
@@ -270,78 +267,9 @@ namespace Camera_FOV
         // ------------------------------
         // THEME MANAGEMENT
         // ------------------------------
-        private void LoadThemeState()
-        {
-            try
-            {
-                if (File.Exists(ConfigFilePath))
-                {
-                    var json = File.ReadAllText(ConfigFilePath);
-                    var config = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
-
-                    if (config != null && config.ContainsKey("IsDarkMode"))
-                    {
-                        _isDarkMode = Convert.ToBoolean(config["IsDarkMode"]);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to load theme state: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        private void SaveThemeState()
-        {
-            try
-            {
-                var config = new { IsDarkMode = _isDarkMode };
-                Directory.CreateDirectory(Path.GetDirectoryName(ConfigFilePath));
-                File.WriteAllText(ConfigFilePath, JsonConvert.SerializeObject(config));
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to save theme state: {ex.Message}", "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        private void LoadTheme()
-        {
-            var assemblyName = Assembly.GetExecutingAssembly().GetName().Name;
-            var themeUri = _isDarkMode
-                ? $"pack://application:,,,/{assemblyName};component/UI/Themes/DarkTheme.xaml"
-                : $"pack://application:,,,/{assemblyName};component/UI/Themes/LightTheme.xaml";
-
-            try
-            {
-                var resourceDict = new ResourceDictionary
-                {
-                    Source = new Uri(themeUri, UriKind.Absolute)
-                };
-
-                // Clear existing resource dictionaries except Material Design resources
-                var materialDesignResources = this.Resources.MergedDictionaries
-                    .Where(rd => rd.Source != null && rd.Source.ToString().Contains("MaterialDesign"))
-                    .ToList();
-
-                this.Resources.MergedDictionaries.Clear();
-                foreach (var rd in materialDesignResources)
-                {
-                    this.Resources.MergedDictionaries.Add(rd);
-                }
-
-                // Add the selected theme resource dictionary
-                this.Resources.MergedDictionaries.Add(resourceDict);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to load theme: {ex.Message}", "Theme Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
         private void ToggleTheme_Click(object sender, RoutedEventArgs e)
         {
-            _isDarkMode = ThemeToggleButton.IsChecked == true;
-            LoadTheme();
-            SaveThemeState();
+            ThemeManager.SetDarkMode(ThemeToggleButton.IsChecked == true);
         }
 
         // ------------------------------
@@ -619,6 +547,7 @@ namespace Camera_FOV
 
                         // Store reference to element for parameter write-back
                         _selectedCameraElement = element;
+                        ShowSelectedCamera(element);
 
                         // Display only the user rotation in UI (base rotation is applied silently)
                         RotationAngleTextBox.Text = userRotation.ToString("F0", CultureInfo.InvariantCulture);
@@ -740,6 +669,17 @@ namespace Camera_FOV
             }
         }
 
+
+        // Shows which camera the panel is working on, so the current state is always visible.
+        private void ShowSelectedCamera(Element camera)
+        {
+            string typeName = _doc.GetElement(camera.GetTypeId())?.Name;
+            CameraStatusTitle.Text = string.IsNullOrWhiteSpace(typeName) ? camera.Name : typeName;
+            CameraStatusTitle.ToolTip = CameraStatusTitle.Text;
+            CameraStatusDetail.Text = $"Element ID {camera.Id}";
+            CameraStatusIcon.SetResourceReference(ForegroundProperty, "Accent.Text");
+            SelectElementsButton.Content = "Change";
+        }
 
         private void FilledRegionButton_Click(object sender, RoutedEventArgs e)
         {

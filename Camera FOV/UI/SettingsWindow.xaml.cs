@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using Camera_FOV.Services;
@@ -7,21 +8,20 @@ namespace Camera_FOV
     public partial class SettingsWindow : Window
     {
         private MainWindow _mainWindow;
+        private readonly double _initialResolution;
+        private bool _saved;
 
         public SettingsWindow(MainWindow mainWindow)
         {
             InitializeComponent();
             _mainWindow = mainWindow;
-            
-            // Sync resources (Theme) from MainWindow
-            this.Resources.MergedDictionaries.Clear();
-            foreach (var mergedDict in _mainWindow.Resources.MergedDictionaries)
-            {
-                this.Resources.MergedDictionaries.Add(mergedDict);
-            }
-            
+
+            ThemeManager.Register(this);
+            Loaded += (s, e) => Motion.Reveal(ContentRoot);
+
             // Sync slider value
-            ValueSlider.Value = _mainWindow.GetSliderResolution();
+            _initialResolution = _mainWindow.GetSliderResolution();
+            ValueSlider.Value = _initialResolution;
 
             // Load Parameter Configuration
             ParamRotation.Text = SettingsManager.Settings.ParameterName_UserRotation;
@@ -59,9 +59,24 @@ namespace Camera_FOV
             SettingsManager.Settings.ParameterName_FOVOverride = ParamFOVOverride.Text;
             SettingsManager.Settings.ParameterName_StandardFOV = ParamStandardFOV.Text;
             SettingsManager.Settings.ParameterName_Resolution = ParamResolution.Text;
-            
+
             SettingsManager.SaveSettings();
+            _saved = true;
             this.Close();
+        }
+
+        private void CancelButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
+        // Closing without saving (Cancel, Esc or the close button) leaves everything as it was.
+        protected override void OnClosed(EventArgs e)
+        {
+            if (!_saved)
+                _mainWindow?.UpdateSliderResolution(_initialResolution);
+
+            base.OnClosed(e);
         }
     }
 }

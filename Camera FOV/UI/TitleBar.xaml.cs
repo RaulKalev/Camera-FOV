@@ -1,24 +1,34 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Shapes;
+using MaterialDesignThemes.Wpf;
 
 namespace Camera_FOV
 {
     public partial class TitleBar : UserControl
     {
+        public static readonly DependencyProperty IconKindProperty = DependencyProperty.Register(
+            nameof(IconKind), typeof(PackIconKind), typeof(TitleBar), new PropertyMetadata(PackIconKind.Cctv));
+
+        public static readonly DependencyProperty CanMinimizeProperty = DependencyProperty.Register(
+            nameof(CanMinimize), typeof(bool), typeof(TitleBar), new PropertyMetadata(true));
+
         public TitleBar()
         {
             InitializeComponent();
+        }
+
+        /// <summary>Glyph shown in the app tile next to the title.</summary>
+        public PackIconKind IconKind
+        {
+            get => (PackIconKind)GetValue(IconKindProperty);
+            set => SetValue(IconKindProperty, value);
+        }
+
+        public bool CanMinimize
+        {
+            get => (bool)GetValue(CanMinimizeProperty);
+            set => SetValue(CanMinimizeProperty, value);
         }
 
         private void TitleBar_MouseDown(object sender, MouseButtonEventArgs e)
@@ -42,15 +52,5 @@ namespace Camera_FOV
         {
             Window.GetWindow(this)?.Close();
         }
-        private void ToggleFeatureButton_Checked(object sender, RoutedEventArgs e)
-        {
-
-        }
-
-        private void ToggleFeatureButton_Unchecked(object sender, RoutedEventArgs e)
-        {
-
-        }
-
     }
 }
